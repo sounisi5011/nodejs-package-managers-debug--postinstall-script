@@ -81,7 +81,7 @@ jobs:
               await exec.exec('node --version');
               await exec.exec(pmType, ['--version']);
             });
-            await core.group('Install', exec.exec(pmType, ['install']));
+            await core.group('Install', () => exec.exec(pmType, ['install']));
 
   # Successfully complete this job when all jobs have been completed.
   # Only by checking this job, it is possible to determine if CI is complete or not.
