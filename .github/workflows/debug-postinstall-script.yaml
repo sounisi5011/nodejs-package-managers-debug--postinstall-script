@@ -40,7 +40,10 @@ jobs:
               .findLast(Boolean) ?? process.env.POSTINSTALL_TYPE;
             const envs = {
               cwd: process.cwd(),
-              ...Object.fromEntries(Object.entries(process.env).filter(([key]) => /^npm_/i.test(key))),
+              ...Object.fromEntries(
+                Object.entries(process.env)
+                  .filter(([key]) => /^(?:npm|yarn|pnpm|bun)_/i.test(key)),
+              ),
             };
             if (postinstallType) console.log(postinstallType);
             console.log(envs);
