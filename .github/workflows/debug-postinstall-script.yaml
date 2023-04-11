@@ -32,6 +32,7 @@ jobs:
         shell: bash
         run: |
           cat << 'EOF' > ./postinstall.js
+          #!/usr/bin/env node
             console.log({
               cwd: process.cwd(),
               ...Object.fromEntries(Object.entries(process.env).filter(([key]) => /^npm_/i.test(key))),
