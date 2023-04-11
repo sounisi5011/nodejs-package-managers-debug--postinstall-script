@@ -122,12 +122,17 @@ jobs:
               await exec.exec(pmType, ['--version']);
             });
 
+            if (pmType === 'yarn' && !packageManager.startsWith('yarn@1.')) {
+              // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
+              await core.group('Setup', async () => {
+                await exec.exec('yarn config set enableImmutableInstalls false');
+              });
+            }
+
             const tarballPath = './foo.tgz';
             let env = {
               ...process.env,
               POSTINSTALL_TYPE: 'Local Dependencies',
-              // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
-              YARN_ENABLE_IMMUTABLE_INSTALLS: 'false',
             };
             if (pmType === 'npm') {
               await exec.exec('npm install', [tarballPath], { env });
