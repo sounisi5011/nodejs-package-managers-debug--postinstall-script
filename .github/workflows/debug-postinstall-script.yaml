@@ -32,10 +32,18 @@ jobs:
         shell: bash
         run: |
           cat << 'EOF' > ./postinstall.js
-            console.log({
+            const { appendFileSync } = require('fs');
+            const { inspect } = require('util');
+
+            const envs = {
               cwd: process.cwd(),
               ...Object.fromEntries(Object.entries(process.env).filter(([key]) => /^npm_/i.test(key))),
-            });
+            };
+            console.log(envs);
+
+            const { GITHUB_STEP_SUMMARY } = process.env;
+            if (GITHUB_STEP_SUMMARY)
+              appendFileSync(GITHUB_STEP_SUMMARY, '```js\n' + inspect(envs) + '\n```\n\n');
           EOF
 
           mkdir foo
@@ -78,6 +86,8 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
+            const { readFile, writeFile } = require('fs/promises');
+
             const packageManager = '${{ matrix.package-manager }}';
             const pmType = packageManager.replace(/@.+$/s, '');
             await core.group('Show node and package manager version', async () => {
@@ -86,17 +96,25 @@ jobs:
             });
 
             const tarballPath = './foo.tgz';
-            if (pmType === 'npm') {
-              await exec.exec('npm install', [tarballPath]);
-            } else if (pmType === 'yarn') {
-              await exec.exec('yarn add', [tarballPath], {
-                // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
-                env: { ...process.env, YARN_ENABLE_IMMUTABLE_INSTALLS: 'false' },
-              });
-            } else if (pmType === 'pnpm') {
-              await exec.exec('pnpm add', [tarballPath]);
-            } else if (pmType === 'bun') {
-              await exec.exec('bun add', [tarballPath]);
+            try {
+              if (pmType === 'npm') {
+                await exec.exec('npm install', [tarballPath]);
+              } else if (pmType === 'yarn') {
+                await exec.exec('yarn add', [tarballPath], {
+                  // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
+                  env: { ...process.env, YARN_ENABLE_IMMUTABLE_INSTALLS: 'false' },
+                });
+              } else if (pmType === 'pnpm') {
+                await exec.exec('pnpm add', [tarballPath]);
+              } else if (pmType === 'bun') {
+                await exec.exec('bun add', [tarballPath]);
+              }
+            } finally {
+              const { GITHUB_STEP_SUMMARY } = process.env;
+              if (GITHUB_STEP_SUMMARY) {
+                const installResult = await readFile(GITHUB_STEP_SUMMARY, 'utf8');
+                await writeFile(GITHUB_STEP_SUMMARY, `<details><summary>${packageManager}</summary>\n\n${installResult.trim()}\n\n</details>\n\n`);
+              }
             }
 
   # Successfully complete this job when all jobs have been completed.
