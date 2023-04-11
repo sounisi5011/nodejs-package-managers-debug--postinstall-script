@@ -63,7 +63,8 @@ jobs:
           fi
 
       - name: Enable Corepack (Automatically setup a package manager for Node.js)
-        if: ! startsWith(matrix.package-manager, 'bun@')
+        if: |
+          ! startsWith(matrix.package-manager, 'bun@')
         shell: bash
         run: |
           corepack enable
