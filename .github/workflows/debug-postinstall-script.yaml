@@ -50,7 +50,7 @@ jobs:
             }
           )
           {
-            echo '{}' | jq '.dependencies.foo = "file:./foo.tgz" | .scripts.postinstall = "node ./postinstall.js"'
+            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js"'
           } > ./package.json
 
       - name: Install Bun
@@ -78,12 +78,28 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const pmType = '${{ matrix.package-manager }}'.replace(/@.+$/s, '');
+            const packageManager = '${{ matrix.package-manager }}';
+            const pmType = packageManager.replace(/@.+$/s, '');
             await core.group('Show node and package manager version', async () => {
               await exec.exec('node --version');
               await exec.exec(pmType, ['--version']);
             });
-            await core.group('Install', () => exec.exec(pmType, ['install']));
+
+            const tarballPath = './foo.tgz';
+            await core.group('Install', async () => {
+              if (pmType === 'npm') {
+                await exec.exec('npm install', [tarballPath]);
+              } else if (pmType === 'yarn') {
+                await exec.exec('yarn add', [tarballPath], {
+                  // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
+                  env: { ...process.env, YARN_ENABLE_IMMUTABLE_INSTALLS: 'false' },
+                });
+              } else if (pmType === 'pnpm') {
+                await exec.exec('pnpm add', [tarballPath]);
+              } else if (pmType === 'bun') {
+                await exec.exec('bun add', [tarballPath]);
+              }
+            });
 
   # Successfully complete this job when all jobs have been completed.
   # Only by checking this job, it is possible to determine if CI is complete or not.
