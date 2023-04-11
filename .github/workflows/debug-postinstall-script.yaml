@@ -110,6 +110,15 @@ jobs:
               await exec.exec(pmType, ['--version']);
             });
 
+            if (pmType === 'pnpm') {
+              await core.group('Setup', async () => {
+                // The "pnpm add --global ..." command requires a global bin directory.
+                // This command creates it.
+                // see https://github.com/pnpm/pnpm/issues/4658
+                await exec.exec('pnpm setup');
+              });
+            }
+
             const tarballPath = './foo.tgz';
             let env = {
               ...process.env,
