@@ -32,27 +32,25 @@ jobs:
         shell: bash
         run: |
           cat << 'EOF' > ./postinstall.js
-          #!/usr/bin/env node
             console.log({
               cwd: process.cwd(),
               ...Object.fromEntries(Object.entries(process.env).filter(([key]) => /^npm_/i.test(key))),
             });
           EOF
-          chmod u+x ./postinstall.js
 
           mkdir foo
           (
             cd foo && {
               cp ../postinstall.js ./
               {
-                echo '{}' | jq '.name = "foo" | .version = "0.0.0" | .scripts.postinstall = "./postinstall.js"'
+                echo '{}' | jq '.name = "foo" | .version = "0.0.0" | .scripts.postinstall = "node ./postinstall.js"'
               } > ./package.json
               npm pack
               mv ./*.tgz ../foo.tgz
             }
           )
           {
-            echo '{}' | jq '.dependencies.foo = "file:./foo.tgz" | .scripts.postinstall = "./postinstall.js"'
+            echo '{}' | jq '.dependencies.foo = "file:./foo.tgz" | .scripts.postinstall = "node ./postinstall.js"'
           } > ./package.json
 
       - name: Install Bun
