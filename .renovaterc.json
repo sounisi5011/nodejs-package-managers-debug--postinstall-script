@@ -1,0 +1,20 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:js-app", ":semanticCommits", ":maintainLockFilesWeekly"],
+  "ignorePresets": ["group:monorepos"],
+  "packageRules": [
+    {
+      "matchPackageNames": ["commitizen", "cz-conventional-changelog"],
+      "groupName": "commitizen packages"
+    },
+    {
+      "matchPackageNames": [
+        "lefthook",
+        "prettier",
+        "prettier-package-json",
+        "sort-package-json"
+      ],
+      "groupName": "code formatter packages"
+    }
+  ]
+}
