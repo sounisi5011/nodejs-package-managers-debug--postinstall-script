@@ -147,7 +147,7 @@ jobs:
                   .map(([key, value]) => [key, [value, PNPM_HOME].join(path.delimiter)])
               );
 
-              await exec.exec('pnpm add --global', [tarballPath], {
+              await exec.exec('pnpm add --global', [path.resolve(tarballPath)], {
                 env: {
                   ...env,
                   ...pathEnv,
