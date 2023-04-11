@@ -146,11 +146,11 @@ jobs:
               if (packageManager.startsWith('yarn@1.')) {
                 await exec.exec('yarn global add', [tarballPath], { env });
               } else {
-                await exec.exec('yarn dlx --package', [
-                  path.resolve(tarballPath)
-                    .replace(/^[A-Z]:(?=\\)/i, ''),
-                  'bar',
-                ], { env });
+                // Note: On Windows, the "yarn dlx --package" command does not know the local filepath
+                // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
+                if (process.platform !== 'win32') {
+                  await exec.exec('yarn dlx --package', [path.resolve(tarballPath), 'bar'], { env });
+                }
               }
             } else if (pmType === 'pnpm') {
               // The "pnpm add --global ..." command requires a global bin directory.
