@@ -100,6 +100,8 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
+            const path = require('path');
+
             const packageManager = '${{ matrix.package-manager }}';
             const pmType = packageManager.replace(/@.+$/s, '');
             await core.group('Show node and package manager version', async () => {
@@ -131,12 +133,12 @@ jobs:
               if (packageManager.startsWith('yarn@1.')) {
                 await exec.exec('yarn global add', [tarballPath], { env });
               } else {
-                await exec.exec('yarn dlx --package', [tarballPath, 'bar'], { env });
+                await exec.exec('yarn dlx --package', [path.resolve(tarballPath), 'bar'], { env });
               }
             } else if (pmType === 'pnpm') {
               await exec.exec('pnpm add --global', [tarballPath], { env });
             } else if (pmType === 'bun') {
-              await exec.exec('bun add --global', [tarballPath], { env });
+              await exec.exec('bun add --global', [path.resolve(tarballPath)], { env });
             }
 
   # Successfully complete this job when all jobs have been completed.
