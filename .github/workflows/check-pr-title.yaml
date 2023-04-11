@@ -11,6 +11,8 @@ jobs:
     if: |
       ! contains(github.event.pull_request.labels.*.name, 'skip ci')
     runs-on: ubuntu-latest
+    permissions:
+      statuses: write
     steps:
       - uses: aslafy-z/conventional-pr-title-action@v3
         with:
