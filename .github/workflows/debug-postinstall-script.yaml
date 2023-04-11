@@ -65,7 +65,7 @@ jobs:
             cd foo && {
               cp ../postinstall.js ./
               {
-                echo '{}' | jq '.name = "foo" | .version = "0.0.0" | .scripts.postinstall = "node ./postinstall.js"'
+                echo '{}' | jq '.name = "foo" | .version = "0.0.0" | .scripts.postinstall = "node ./postinstall.js" | .bin.bar = "node -e \"// do nothing\""'
               } > ./package.json
               npm pack
               mv ./*.tgz ../foo.tgz
@@ -108,7 +108,7 @@ jobs:
             });
 
             const tarballPath = './foo.tgz';
-            const env = {
+            let env = {
               ...process.env,
               POSTINSTALL_TYPE: 'Local Dependencies',
               // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
@@ -122,6 +122,21 @@ jobs:
               await exec.exec('pnpm add', [tarballPath], { env });
             } else if (pmType === 'bun') {
               await exec.exec('bun add', [tarballPath], { env });
+            }
+
+            env.POSTINSTALL_TYPE = 'Global Dependencies';
+            if (pmType === 'npm') {
+              await exec.exec('npm install --global', [tarballPath], { env });
+            } else if (pmType === 'yarn') {
+              if (packageManager.startsWith('yarn@1.')) {
+                await exec.exec('yarn global add', [tarballPath], { env });
+              } else {
+                await exec.exec('yarn dlx --package', [tarballPath, 'bar'], { env });
+              }
+            } else if (pmType === 'pnpm') {
+              await exec.exec('pnpm add --global', [tarballPath], { env });
+            } else if (pmType === 'bun') {
+              await exec.exec('bun add --global', [tarballPath], { env });
             }
 
   # Successfully complete this job when all jobs have been completed.
