@@ -101,6 +101,7 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
+            const os = require('os');
             const path = require('path');
 
             const packageManager = '${{ matrix.package-manager }}';
@@ -109,15 +110,6 @@ jobs:
               await exec.exec('node --version');
               await exec.exec(pmType, ['--version']);
             });
-
-            if (pmType === 'pnpm') {
-              await core.group('Setup', async () => {
-                // The "pnpm add --global ..." command requires a global bin directory.
-                // This command creates it.
-                // see https://github.com/pnpm/pnpm/issues/4658
-                await exec.exec('pnpm setup');
-              });
-            }
 
             const tarballPath = './foo.tgz';
             let env = {
@@ -146,7 +138,10 @@ jobs:
                 await exec.exec('yarn dlx --package', [path.resolve(tarballPath), 'bar'], { env });
               }
             } else if (pmType === 'pnpm') {
-              await exec.exec('pnpm add --global', [tarballPath], { env });
+              // The "pnpm add --global ..." command requires a global bin directory.
+              // see https://github.com/pnpm/pnpm/issues/4658
+              const PNPM_HOME = path.resolve(os.homedir(), '.pnpm-home');
+              await exec.exec('pnpm add --global', [tarballPath], { env: { ...env, PNPM_HOME } });
             } else if (pmType === 'bun') {
               await exec.exec('bun add --global', [path.resolve(tarballPath)], { env });
             }
