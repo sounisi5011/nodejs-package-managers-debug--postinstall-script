@@ -1,0 +1,11 @@
+*
+!*/
+!*.json
+!*.json5
+!*.md
+!*.yaml
+!*.yml
+!.czrc
+
+package.json
+pnpm-lock.yaml

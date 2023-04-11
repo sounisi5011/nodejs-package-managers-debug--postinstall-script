@@ -1,0 +1,25 @@
+pre-commit:
+  parallel: true
+  commands:
+    prettier:
+      glob: "{*.{json,json5,md,yaml,yml},.czrc}"
+      stage_fixed: true
+      run: pnpm exec prettier --write {staged_files}
+    format-package-json:
+      # Note: If "package.json" is specified, only the root package.json file will be included.
+      #       If "**/package.json" is specified, only package.json files in subdirectories will be included.
+      #       To include both, it appears that the "{,**/}package.json" pattern should be used.
+      glob: "{,**/}package.json"
+      stage_fixed: true
+      run: >-
+        pnpm exec prettier-package-json --write {staged_files}
+        && pnpm exec sort-package-json {staged_files}
+
+prepare-commit-msg:
+  # Always prints the output of each command.
+  # This allows the error log to be checked even if the command becomes busy.
+  follow: true
+  commands:
+    commitizen:
+      interactive: true
+      run: node_modules/.bin/cz --hook || true
