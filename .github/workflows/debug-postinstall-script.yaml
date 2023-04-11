@@ -65,8 +65,9 @@ jobs:
             cd foo && {
               cp ../postinstall.js ./
               {
-                echo '{}' | jq '.name = "foo" | .version = "0.0.0" | .scripts.postinstall = "node ./postinstall.js" | .bin.bar = "node -e \"// do nothing\""'
+                echo '{}' | jq '.name = "foo" | .version = "0.0.0" | .scripts.postinstall = "node ./postinstall.js" | .bin.bar = "./do-nothing.js"'
               } > ./package.json
+              echo '#!/usr/bin/env node' > ./do-nothing.js
               npm pack
               mv ./*.tgz ../foo.tgz
             }
