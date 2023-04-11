@@ -1,0 +1,106 @@
+name: Debug postinstall script
+on:
+  push:
+    branches:
+      - main
+    tags-ignore:
+      - "**"
+  pull_request:
+jobs:
+  debug-postinstall-script:
+    if: |
+      ! (
+        contains(github.event.pull_request.labels.*.name, 'invalid')
+        || contains(github.event.pull_request.labels.*.name, 'skip ci')
+      )
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        package-manager:
+          - npm@9.6.4
+          - yarn@1.22.19
+          - yarn@3.5.0
+          - pnpm@8.2.0
+          - bun@0.5.9
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Setup test data
+        shell: bash
+        run: |
+          cat << 'EOF' > ./postinstall.js
+            console.log({
+              cwd: process.cwd(),
+              ...Object.fromEntries(Object.entries(process.env).filter(([key]) => /^npm_/i.test(key))),
+            });
+          EOF
+          chmod u+x ./postinstall.js
+
+          mkdir foo
+          (
+            cd foo && {
+              cp ../postinstall.js ./
+              {
+                echo '{}' | jq '.name = "foo" | .version = "0.0.0" | .scripts.postinstall = "./postinstall.js"'
+              } > ./package.json
+              npm pack
+              mv ./*.tgz ../foo.tgz
+            }
+          )
+          {
+            echo '{}' | jq '.dependencies.foo = "file:./foo.tgz" | .scripts.postinstall = "./postinstall.js"'
+          } > ./package.json
+
+      - name: Install Bun
+        if: startsWith(matrix.package-manager, 'bun@')
+        shell: bash
+        run: |
+          npm install --global --force '${{ matrix.package-manager }}'
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            # Windows installs global packages to a directory that has lower priority than the default node install so we also need to edit $PATH
+            # see https://github.com/vercel/turbo/pull/1632/files#diff-b92a3120126a9ffe46d7d5ec3a8496ef1eac951db09e1972fac7c78438e36c42R69
+            npm config get prefix >> "${GITHUB_PATH}"
+          fi
+
+      - name: Enable Corepack (Automatically setup a package manager for Node.js)
+        if: ! startsWith(matrix.package-manager, 'bun@')
+        shell: bash
+        run: |
+          corepack enable
+          corepack enable npm
+          < ./package.json jq '.packageManager = "${{ matrix.package-manager }}"' > ./package.json~new
+          mv ./package.json~new ./package.json
+
+      - name: Run install
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const pmType = '${{ matrix.package-manager }}'.replace(/@.+$/s, '');
+            await core.group('Show node and package manager version', async () => {
+              await exec.exec('node --version');
+              await exec.exec(pmType, ['--version']);
+            });
+            await core.group('Install', exec.exec(pmType, ['install']));
+
+  # Successfully complete this job when all jobs have been completed.
+  # Only by checking this job, it is possible to determine if CI is complete or not.
+  # So we can simplify our GitHub status check configuration.
+  # see https://github.com/orgs/community/discussions/26822
+  # see https://github.com/sounisi5011/npm-packages/blob/2a5ca2de696eeb8b40a38de90580441c4c6c96e0/.github/workflows/ci.yaml#L482-L498
+  complete:
+    name: Complete Workflow
+    needs: debug-postinstall-script
+    if:
+      always() && github.event.pull_request
+      # This job is required only for Pull Requests.
+      # It does not need to be run on other branches.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all job status
+        # see https://docs.github.com/en/actions/learn-github-actions/contexts#needs-context
+        # see https://docs.github.com/en/actions/learn-github-actions/expressions#contains
+        if: |
+          contains(needs.*.result, 'failure')
+          || contains(needs.*.result, 'cancelled')
+          || contains(needs.*.result, 'skipped')
+        run: exit 1
