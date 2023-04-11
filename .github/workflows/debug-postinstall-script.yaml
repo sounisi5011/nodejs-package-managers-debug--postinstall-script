@@ -92,6 +92,14 @@ jobs:
           ! startsWith(matrix.package-manager, 'bun@')
         shell: bash
         run: |
+          if type yarn >/dev/null 2>&1; then
+            echo '[command]npm uninstall --global yarn'
+            npm uninstall --global yarn
+          fi
+          if type pnpm >/dev/null 2>&1; then
+            echo '[command]npm uninstall --global pnpm'
+            npm uninstall --global pnpm
+          fi
           corepack enable
           corepack enable npm
           < ./package.json jq '.packageManager = "${{ matrix.package-manager }}"' > ./package.json~new
