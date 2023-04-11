@@ -146,7 +146,11 @@ jobs:
               if (packageManager.startsWith('yarn@1.')) {
                 await exec.exec('yarn global add', [tarballPath], { env });
               } else {
-                await exec.exec('yarn dlx --package', [(path === path.win32 ? 'file:' : '') + path.resolve(tarballPath), 'bar'], { env });
+                await exec.exec('yarn dlx --package', [
+                  path.resolve(tarballPath)
+                    .replace(/^[A-Z]:(?=\\)/i, ''),
+                  'bar',
+                ], { env });
               }
             } else if (pmType === 'pnpm') {
               // The "pnpm add --global ..." command requires a global bin directory.
