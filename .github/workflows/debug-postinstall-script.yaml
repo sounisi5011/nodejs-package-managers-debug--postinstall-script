@@ -35,15 +35,29 @@ jobs:
             const { appendFileSync } = require('fs');
             const { inspect } = require('util');
 
+            const postinstallType = process.argv
+              .map(arg => /^--type\s*=(.+)$/.exec(arg)?.[1].trim())
+              .findLast(Boolean) ?? process.env.POSTINSTALL_TYPE;
             const envs = {
               cwd: process.cwd(),
               ...Object.fromEntries(Object.entries(process.env).filter(([key]) => /^npm_/i.test(key))),
             };
+            if (postinstallType) console.log(postinstallType);
             console.log(envs);
 
             const { GITHUB_STEP_SUMMARY } = process.env;
             if (GITHUB_STEP_SUMMARY)
-              appendFileSync(GITHUB_STEP_SUMMARY, '```js\n' + inspect(envs) + '\n```\n\n');
+              appendFileSync(
+                GITHUB_STEP_SUMMARY,
+                [
+                  '```js',
+                  ...(postinstallType ? [`// ${postinstallType}`] : []),
+                  inspect(envs),
+                  '```',
+                  '',
+                  '',
+                ].join('\n'),
+              );
           EOF
 
           mkdir foo
@@ -58,7 +72,7 @@ jobs:
             }
           )
           {
-            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js"'
+            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project"'
           } > ./package.json
 
       - name: Install Bun
@@ -86,8 +100,6 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const { readFile, writeFile } = require('fs/promises');
-
             const packageManager = '${{ matrix.package-manager }}';
             const pmType = packageManager.replace(/@.+$/s, '');
             await core.group('Show node and package manager version', async () => {
@@ -96,25 +108,20 @@ jobs:
             });
 
             const tarballPath = './foo.tgz';
-            try {
-              if (pmType === 'npm') {
-                await exec.exec('npm install', [tarballPath]);
-              } else if (pmType === 'yarn') {
-                await exec.exec('yarn add', [tarballPath], {
-                  // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
-                  env: { ...process.env, YARN_ENABLE_IMMUTABLE_INSTALLS: 'false' },
-                });
-              } else if (pmType === 'pnpm') {
-                await exec.exec('pnpm add', [tarballPath]);
-              } else if (pmType === 'bun') {
-                await exec.exec('bun add', [tarballPath]);
-              }
-            } finally {
-              const { GITHUB_STEP_SUMMARY } = process.env;
-              if (GITHUB_STEP_SUMMARY) {
-                const installResult = await readFile(GITHUB_STEP_SUMMARY, 'utf8');
-                await writeFile(GITHUB_STEP_SUMMARY, `<details><summary>${packageManager}</summary>\n\n${installResult.trim()}\n\n</details>\n\n`);
-              }
+            const env = {
+              ...process.env,
+              POSTINSTALL_TYPE: 'Local Dependencies',
+              // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
+              YARN_ENABLE_IMMUTABLE_INSTALLS: 'false',
+            };
+            if (pmType === 'npm') {
+              await exec.exec('npm install', [tarballPath], { env });
+            } else if (pmType === 'yarn') {
+              await exec.exec('yarn add', [tarballPath], { env });
+            } else if (pmType === 'pnpm') {
+              await exec.exec('pnpm add', [tarballPath], { env });
+            } else if (pmType === 'bun') {
+              await exec.exec('bun add', [tarballPath], { env });
             }
 
   # Successfully complete this job when all jobs have been completed.
