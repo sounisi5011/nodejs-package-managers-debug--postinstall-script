@@ -141,7 +141,19 @@ jobs:
               // The "pnpm add --global ..." command requires a global bin directory.
               // see https://github.com/pnpm/pnpm/issues/4658
               const PNPM_HOME = path.resolve(os.homedir(), '.pnpm-home');
-              await exec.exec('pnpm add --global', [tarballPath], { env: { ...env, PNPM_HOME } });
+              const pathEnv = Object.fromEntries(
+                Object.entries(env)
+                  .filter(([key]) => /^PATH$/i.test(key))
+                  .map(([key, value]) => [key, [value, PNPM_HOME].join(path.delimiter)])
+              );
+
+              await exec.exec('pnpm add --global', [tarballPath], {
+                env: {
+                  ...env,
+                  ...pathEnv,
+                  PNPM_HOME,
+                },
+              });
             } else if (pmType === 'bun') {
               await exec.exec('bun add --global', [path.resolve(tarballPath)], { env });
             }
