@@ -23,6 +23,9 @@ jobs:
           - yarn@3.5.0
           - pnpm@8.2.0
           - bun@0.5.9
+        exclude:
+          - package-manager: bun@0.5.9
+            os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
       - name: Setup test data
