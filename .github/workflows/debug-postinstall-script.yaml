@@ -7,12 +7,62 @@ on:
       - "**"
   pull_request:
 jobs:
-  debug-postinstall-script:
+  setup:
     if: |
       ! (
         contains(github.event.pull_request.labels.*.name, 'invalid')
         || contains(github.event.pull_request.labels.*.name, 'skip ci')
       )
+    runs-on: ubuntu-latest
+    env:
+      repo-dirname: repo
+      artifact-name: debug-package@${{ github.event.number && format('pr-{0}', github.event.number) || github.sha }}
+      archive-filename: debug-package.tar.zst
+      tarball-name: foo.tgz
+    outputs:
+      artifact-name: ${{ env.artifact-name }}
+      archive-filename: ${{ env.archive-filename }}
+      tarball-name: ${{ env.tarball-name }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          path: ./${{ env.repo-dirname }}
+
+      - name: Setup debug package
+        shell: bash
+        run: |
+          readonly root_path="$PWD"
+          (
+            cd './${{ env.repo-dirname }}/postinstall-debug-package/' && {
+              cp ./postinstall.js "${root_path}/"
+              npm pack
+              mv ./*.tgz "${root_path}/${{ env.tarball-name }}"
+            }
+          )
+          {
+            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project"'
+          } > ./package.json
+
+          find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
+            | xargs -0 tar -c --file './${{ env.archive-filename }}' --zstd --verbose
+        # Note: Convert the debug package into a single archive file. This is for the following reasons:
+        #       + Maintaining file permissions and case sensitive files
+        #         see https://github.com/actions/upload-artifact/blob/v3.1.2/README.md#maintaining-file-permissions-and-case-sensitive-files
+        #       + Reduce the number of API calls
+        #         see https://github.com/actions/upload-artifact/blob/v3.1.2/README.md#too-many-uploads-resulting-in-429-responses
+
+      - name: Upload debug package
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.artifact-name }}
+          path: ${{ env.archive-filename }}
+          retention-days:
+            1
+            # The resulting artifact of the build is intended to be used in the next job.
+            # There is no need to store them for long periods of time.
+
+  debug-postinstall-script:
+    needs: setup
     strategy:
       fail-fast: false
       matrix:
@@ -45,23 +95,15 @@ jobs:
             os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      - name: Download debug package
+        uses: actions/download-artifact@v3
         with:
-          path: ./repo
-      - name: Setup test data
+          name: ${{ needs.setup.outputs.artifact-name }}
+          path: ~/debug-package-artifact
+
+      - name: Restore debug package
         shell: bash
-        run: |
-          readonly root_path="$PWD"
-          (
-            cd ./repo/postinstall-debug-package/ && {
-              cp ./postinstall.js "${root_path}/"
-              npm pack
-              mv ./*.tgz "${root_path}/foo.tgz"
-            }
-          )
-          {
-            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project"'
-          } > ./package.json
+        run: tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
       - name: Install Bun
         if: startsWith(matrix.package-manager, 'bun@')
@@ -113,7 +155,7 @@ jobs:
               });
             }
 
-            const tarballPath = './foo.tgz';
+            const tarballPath = './${{ needs.setup.outputs.tarball-name }}';
             let env = {
               ...process.env,
               POSTINSTALL_TYPE: 'Local Dependencies',
