@@ -99,6 +99,7 @@ jobs:
           path: ~/debug-package-artifact
 
       - name: Restore debug package
+        shell: bash
         run: tar -x --file ~/debug-package-artifact/'${{ env.debug-package-archive-filename }}' --zstd
 
       - name: Install Bun
