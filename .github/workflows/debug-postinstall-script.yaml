@@ -162,6 +162,8 @@ jobs:
 
       - name: Run install
         uses: actions/github-script@v6
+        env:
+          TARBALL_PATH: ${{ env.tarball-path }}
         with:
           script: |
             const os = require('os');
@@ -181,7 +183,7 @@ jobs:
               });
             }
 
-            const tarballPath = path.resolve('${{ env.tarball-path }}');
+            const tarballPath = path.resolve(process.env.TARBALL_PATH);
             let env = {
               ...process.env,
               POSTINSTALL_TYPE: 'Local Dependencies',
