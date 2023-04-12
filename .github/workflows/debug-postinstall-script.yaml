@@ -100,7 +100,7 @@ jobs:
 
       - name: Restore debug package
         shell: bash
-        run: tar -x --file ~/debug-package-artifact/'${{ env.debug-package-archive-filename }}' --zstd
+        run: tar -x --file ~/debug-package-artifact/'${{ env.debug-package-archive-filename }}' --zstd --verbose
 
       - name: Install Bun
         if: startsWith(matrix.package-manager, 'bun@')
