@@ -1,9 +1,9 @@
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const { appendFile } = require('fs/promises');
 const path = require('path');
 const { inspect, promisify } = require('util');
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 let isGlobalMode = false;
 // In npm and pnpm, global mode can be detected by reading the "npm_config_global" environment variable.
@@ -44,6 +44,10 @@ const postinstallType =
     .map((arg) => /^--type\s*=(.+)$/.exec(arg)?.[1].trim())
     .findLast(Boolean) ?? process.env.POSTINSTALL_TYPE;
 
+/**
+ * @param {string} commandName
+ * @returns {string[]}
+ */
 function packageManagerCommand(commandName) {
   const execpathIsJS =
     process.env.npm_execpath &&
@@ -52,20 +56,29 @@ function packageManagerCommand(commandName) {
     ? // Sometimes there are multiple versions of a package manager on a user's system, such as when using Corepack.
       // In this case, the exec function may call another package manager that is in a different path than the running package manager.
       // To avoid this, use the environment variable "npm_execpath".
-      `${process.execPath} ${process.env.npm_execpath}`
-    : commandName;
+      [process.execPath, process.env.npm_execpath]
+    : [commandName];
 }
 
 (async () => {
   const binCommand = isYarn1
-    ? `${packageManagerCommand('yarn')} ${isGlobalMode ? 'global ' : ''}bin`
+    ? packageManagerCommand('yarn').concat(isGlobalMode ? 'global' : [], 'bin')
     : (process.env.npm_config_user_agent || '')?.startsWith('pnpm/')
-    ? `${packageManagerCommand('pnpm')} bin${isGlobalMode ? ' --global' : ''}`
-    : `${packageManagerCommand('npm')} bin${isGlobalMode ? ' --global' : ''}`;
+    ? packageManagerCommand('pnpm').concat(
+        'bin',
+        isGlobalMode ? '--global' : [],
+      )
+    : packageManagerCommand('npm').concat(
+        'bin',
+        isGlobalMode ? '--global' : [],
+      );
   const debugData = {
     cwd: process.cwd(),
     isGlobalMode,
-    [binCommand]: await execAsync(binCommand).catch((error) => ({ error })),
+    [binCommand.join(' ')]: await execFileAsync(
+      binCommand[0],
+      binCommand.slice(1),
+    ).catch((error) => ({ error })),
     env: Object.fromEntries(
       Object.entries(process.env).filter(([key]) =>
         /^(?:npm|yarn|pnpm|bun)_/i.test(key),
