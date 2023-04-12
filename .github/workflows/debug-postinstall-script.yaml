@@ -45,55 +45,18 @@ jobs:
             os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
+      - uses: actions/checkout@v3
+        with:
+          path: ./repo
       - name: Setup test data
         shell: bash
         run: |
-          cat << 'EOF' > ./postinstall.js
-            const { appendFileSync } = require('fs');
-            const { inspect } = require('util');
-
-            const postinstallType = process.argv
-              .map(arg => /^--type\s*=(.+)$/.exec(arg)?.[1].trim())
-              .findLast(Boolean) ?? process.env.POSTINSTALL_TYPE;
-            const envs = {
-              cwd: process.cwd(),
-              ...Object.fromEntries(
-                Object.entries(process.env)
-                  .filter(([key]) => /^(?:npm|yarn|pnpm|bun)_/i.test(key)),
-              ),
-            };
-            if (postinstallType) console.log(postinstallType);
-            console.log(envs);
-
-            const { GITHUB_STEP_SUMMARY } = process.env;
-            if (GITHUB_STEP_SUMMARY)
-              appendFileSync(
-                GITHUB_STEP_SUMMARY,
-                [
-                  `<details${ Object.keys(envs).length < 30 ? ' open' : ''}>`,
-                  ...(postinstallType ? [`<summary>${postinstallType}</summary>`] : []),
-                  '',
-                  '```js',
-                  inspect(envs),
-                  '```',
-                  '',
-                  '</details>',
-                  '',
-                  '',
-                ].join('\n'),
-              );
-          EOF
-
-          mkdir foo
+          readonly root_path="$PWD"
           (
-            cd foo && {
-              cp ../postinstall.js ./
-              {
-                echo '{}' | jq '.name = "foo" | .version = "0.0.0" | .scripts.postinstall = "node ./postinstall.js" | .bin.bar = "./do-nothing.js"'
-              } > ./package.json
-              echo '#!/usr/bin/env node' > ./do-nothing.js
+            cd ./repo/postinstall-debug-package/ && {
+              cp ./postinstall.js "${root_path}/"
               npm pack
-              mv ./*.tgz ../foo.tgz
+              mv ./*.tgz "${root_path}/foo.tgz"
             }
           )
           {
