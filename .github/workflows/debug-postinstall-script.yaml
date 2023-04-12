@@ -70,10 +70,14 @@ jobs:
               appendFileSync(
                 GITHUB_STEP_SUMMARY,
                 [
+                  `<details${ Object.keys(envs).length < 30 ? ' open' : ''}>`,
+                  ...(postinstallType ? [`<summary>${postinstallType}</summary>`] : []),
+                  '',
                   '```js',
-                  ...(postinstallType ? [`// ${postinstallType}`] : []),
                   inspect(envs),
                   '```',
+                  '',
+                  '</details>',
                   '',
                   '',
                 ].join('\n'),
