@@ -121,6 +121,10 @@ jobs:
           exec_with_debug tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
           tarball_path="$(node -p 'require("path").resolve(...process.argv.slice(1))' '${{ runner.temp }}' '${{ env.tarball-path }}')"
+          ##### DEBUG #####
+          echo "tarball_path: '${tarball_path}'"
+          echo "HOME: '${HOME}'"
+          ##### DEBUG #####
           tarball_name="$(basename "$(unix_like_path "${tarball_path}")")"
           if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "$(unix_like_path "${tarball_path}")"; then
             tarball_path='${{ runner.temp }}/'"${tarball_name}"
