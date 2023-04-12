@@ -1,0 +1,15 @@
+{
+  overrides: [
+    {
+      files: "*.{,c,m}{j,t}s",
+      options: {
+        singleQuote: true,
+        trailingComma: "all",
+      },
+    },
+    {
+      files: ".czrc",
+      options: { parser: "json" },
+    },
+  ],
+}

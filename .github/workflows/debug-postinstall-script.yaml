@@ -1,0 +1,186 @@
+name: Debug postinstall script
+on:
+  push:
+    branches:
+      - main
+    tags-ignore:
+      - "**"
+  pull_request:
+jobs:
+  debug-postinstall-script:
+    if: |
+      ! (
+        contains(github.event.pull_request.labels.*.name, 'invalid')
+        || contains(github.event.pull_request.labels.*.name, 'skip ci')
+      )
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        package-manager:
+          # - npm@1.4.29  # Throws "Reference Error: primordials is not defined"
+          # - npm@2.15.12 # Throws "peerinvalid The package ajv@6.12.6 does not satisfy its siblings' peerDependencies requirements!"
+          # - npm@3.10.10 # Throws "cb.apply is not a function"
+          # - npm@4.6.1   # Throws "cb.apply is not a function"
+          # - npm@5.10.0  # Throws "cb.apply is not a function"
+          - npm@6.14.18
+          - npm@7.24.2
+          - npm@8.19.4
+          - npm@9.6.4
+          - yarn@1.22.19
+          - yarn@2.4.3
+          - yarn@3.5.0
+          - yarn@4.0.0-rc.42
+          # - pnpm@1.43.1  # Throws "Internal Error: Cannot find module '.../bin/pnpm.js'"
+          # - pnpm@2.25.7  # Throws "TypeError: cb.apply is not a function"
+          # - pnpm@3.8.1   # Throws "EACCES: permission denied, mkdir '/usr/local/pnpm-global'"
+          # - pnpm@4.14.4  # Throws "EACCES: permission denied, mkdir '/usr/local/pnpm-global'"
+          # - pnpm@5.18.10 # Throws "EACCES: permission denied, mkdir '/usr/local/pnpm-global'"
+          # - pnpm@6.35.1  # Throws "ELIFECYCLE  Command failed with exit code -4058. .../node_modules/foo postinstall: Failed"
+          - pnpm@7.32.0
+          - pnpm@8.2.0
+          - bun@0.5.9
+        exclude:
+          - package-manager: bun@0.5.9
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          path: ./repo
+      - name: Setup test data
+        shell: bash
+        run: |
+          readonly root_path="$PWD"
+          (
+            cd ./repo/postinstall-debug-package/ && {
+              cp ./postinstall.js "${root_path}/"
+              npm pack
+              mv ./*.tgz "${root_path}/foo.tgz"
+            }
+          )
+          {
+            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project"'
+          } > ./package.json
+
+      - name: Install Bun
+        if: startsWith(matrix.package-manager, 'bun@')
+        shell: bash
+        run: |
+          npm install --global --force '${{ matrix.package-manager }}'
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            # Windows installs global packages to a directory that has lower priority than the default node install so we also need to edit $PATH
+            # see https://github.com/vercel/turbo/pull/1632/files#diff-b92a3120126a9ffe46d7d5ec3a8496ef1eac951db09e1972fac7c78438e36c42R69
+            npm config get prefix >> "${GITHUB_PATH}"
+          fi
+
+      - name: Enable Corepack (Automatically setup a package manager for Node.js)
+        if: |
+          ! startsWith(matrix.package-manager, 'bun@')
+        shell: bash
+        run: |
+          if type yarn >/dev/null 2>&1; then
+            echo '[command]npm uninstall --global yarn'
+            npm uninstall --global yarn
+          fi
+          if type pnpm >/dev/null 2>&1; then
+            echo '[command]npm uninstall --global pnpm'
+            npm uninstall --global pnpm
+          fi
+          corepack enable
+          corepack enable npm
+          < ./package.json jq '.packageManager = "${{ matrix.package-manager }}"' > ./package.json~new
+          mv ./package.json~new ./package.json
+
+      - name: Run install
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const os = require('os');
+            const path = require('path');
+
+            const packageManager = '${{ matrix.package-manager }}';
+            const pmType = packageManager.replace(/@.+$/s, '');
+            await core.group('Show node and package manager version', async () => {
+              await exec.exec('node --version');
+              await exec.exec(pmType, ['--version']);
+            });
+
+            if (pmType === 'yarn' && !packageManager.startsWith('yarn@1.')) {
+              // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
+              await core.group('Setup', async () => {
+                await exec.exec('yarn config set enableImmutableInstalls false');
+              });
+            }
+
+            const tarballPath = './foo.tgz';
+            let env = {
+              ...process.env,
+              POSTINSTALL_TYPE: 'Local Dependencies',
+            };
+            if (pmType === 'npm') {
+              await exec.exec('npm install', [tarballPath], { env });
+            } else if (pmType === 'yarn') {
+              await exec.exec('yarn add', [tarballPath], { env });
+            } else if (pmType === 'pnpm') {
+              await exec.exec('pnpm add', [tarballPath], { env });
+            } else if (pmType === 'bun') {
+              await exec.exec('bun add', [tarballPath], { env });
+            }
+
+            env.POSTINSTALL_TYPE = 'Global Dependencies';
+            if (pmType === 'npm') {
+              await exec.exec('npm install --global', [tarballPath], { env });
+            } else if (pmType === 'yarn') {
+              if (packageManager.startsWith('yarn@1.')) {
+                await exec.exec('yarn global add', [tarballPath], { env });
+              } else {
+                // Note: On Windows, the "yarn dlx --package" command does not know the local filepath
+                // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
+                if (process.platform !== 'win32') {
+                  await exec.exec('yarn dlx --package', [path.resolve(tarballPath), 'bar'], { env });
+                }
+              }
+            } else if (pmType === 'pnpm') {
+              // The "pnpm add --global ..." command requires a global bin directory.
+              // see https://github.com/pnpm/pnpm/issues/4658
+              const PNPM_HOME = path.resolve(os.homedir(), '.pnpm-home');
+              const pathEnv = Object.fromEntries(
+                Object.entries(env)
+                  .filter(([key]) => /^PATH$/i.test(key))
+                  .map(([key, value]) => [key, [value, PNPM_HOME].join(path.delimiter)])
+              );
+
+              await exec.exec('pnpm add --global', [path.resolve(tarballPath)], {
+                env: {
+                  ...env,
+                  ...pathEnv,
+                  PNPM_HOME,
+                },
+              });
+            } else if (pmType === 'bun') {
+              await exec.exec('bun add --global', [path.resolve(tarballPath)], { env });
+            }
+
+  # Successfully complete this job when all jobs have been completed.
+  # Only by checking this job, it is possible to determine if CI is complete or not.
+  # So we can simplify our GitHub status check configuration.
+  # see https://github.com/orgs/community/discussions/26822
+  # see https://github.com/sounisi5011/npm-packages/blob/2a5ca2de696eeb8b40a38de90580441c4c6c96e0/.github/workflows/ci.yaml#L482-L498
+  complete:
+    name: Complete Workflow
+    needs: debug-postinstall-script
+    if:
+      always() && github.event.pull_request
+      # This job is required only for Pull Requests.
+      # It does not need to be run on other branches.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all job status
+        # see https://docs.github.com/en/actions/learn-github-actions/contexts#needs-context
+        # see https://docs.github.com/en/actions/learn-github-actions/expressions#contains
+        if: |
+          contains(needs.*.result, 'failure')
+          || contains(needs.*.result, 'cancelled')
+          || contains(needs.*.result, 'skipped')
+        run: exit 1

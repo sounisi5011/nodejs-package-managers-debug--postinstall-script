@@ -1,0 +1,7 @@
+# Change syntax highlighting on GitHub
+# see https://github.com/github/linguist/blob/5a0c74277548122267d84283910abd5e0b89380e/docs/overrides.md
+
+# The ".czrc" file is parsed as JSONC.
+# see https://github.com/commitizen/cz-cli/blob/v4.3.0/src/commitizen/configLoader.js
+# see https://github.com/commitizen/cz-cli/blob/v4.3.0/src/configLoader/getContent.js#L12-L43
+.czrc linguist-language=JSON-with-Comments

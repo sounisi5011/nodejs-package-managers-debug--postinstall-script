@@ -1,0 +1,10 @@
+{
+  "files.associations": {
+    /**
+     * The ".czrc" file is parsed as JSONC.
+     * see https://github.com/commitizen/cz-cli/blob/v4.3.0/src/commitizen/configLoader.js
+     * see https://github.com/commitizen/cz-cli/blob/v4.3.0/src/configLoader/getContent.js#L12-L43
+     */
+    ".czrc": "jsonc"
+  }
+}
