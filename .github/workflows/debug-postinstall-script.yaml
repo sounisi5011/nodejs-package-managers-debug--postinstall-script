@@ -6,10 +6,6 @@ on:
     tags-ignore:
       - "**"
   pull_request:
-env:
-  debug-package-artifact-name: debug-package@${{ github.event.number && format('pr-{0}', github.event.number) || github.sha }}
-  debug-package-archive-filename: debug-package.tar.zst
-  debug-package-tarball-name: foo.tgz
 jobs:
   setup:
     if: |
@@ -20,6 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       repo-dirname: repo
+      artifact-name: debug-package@${{ github.event.number && format('pr-{0}', github.event.number) || github.sha }}
+      archive-filename: debug-package.tar.zst
+      tarball-name: foo.tgz
+    outputs:
+      artifact-name: ${{ env.artifact-name }}
+      archive-filename: ${{ env.archive-filename }}
+      tarball-name: ${{ env.tarball-name }}
     steps:
       - uses: actions/checkout@v3
         with:
@@ -33,7 +36,7 @@ jobs:
             cd './${{ env.repo-dirname }}/postinstall-debug-package/' && {
               cp ./postinstall.js "${root_path}/"
               npm pack
-              mv ./*.tgz "${root_path}/${{ env.debug-package-tarball-name }}"
+              mv ./*.tgz "${root_path}/${{ env.tarball-name }}"
             }
           )
           {
@@ -41,7 +44,7 @@ jobs:
           } > ./package.json
 
           find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
-            | xargs -0 tar -c --file './${{ env.debug-package-archive-filename }}' --zstd --verbose
+            | xargs -0 tar -c --file './${{ env.archive-filename }}' --zstd --verbose
         # Note: Convert the debug package into a single archive file. This is for the following reasons:
         #       + Maintaining file permissions and case sensitive files
         #         see https://github.com/actions/upload-artifact/blob/v3.1.2/README.md#maintaining-file-permissions-and-case-sensitive-files
@@ -51,8 +54,8 @@ jobs:
       - name: Upload debug package
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.debug-package-artifact-name }}
-          path: ${{ env.debug-package-archive-filename }}
+          name: ${{ env.artifact-name }}
+          path: ${{ env.archive-filename }}
           retention-days:
             1
             # The resulting artifact of the build is intended to be used in the next job.
@@ -95,12 +98,12 @@ jobs:
       - name: Download debug package
         uses: actions/download-artifact@v3
         with:
-          name: ${{ env.debug-package-artifact-name }}
+          name: ${{ needs.setup.outputs.artifact-name }}
           path: ~/debug-package-artifact
 
       - name: Restore debug package
         shell: bash
-        run: tar -x --file ~/debug-package-artifact/'${{ env.debug-package-archive-filename }}' --zstd --verbose
+        run: tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
       - name: Install Bun
         if: startsWith(matrix.package-manager, 'bun@')
@@ -152,7 +155,7 @@ jobs:
               });
             }
 
-            const tarballPath = './${{ env.debug-package-tarball-name }}';
+            const tarballPath = './${{ needs.setup.outputs.tarball-name }}';
             let env = {
               ...process.env,
               POSTINSTALL_TYPE: 'Local Dependencies',
