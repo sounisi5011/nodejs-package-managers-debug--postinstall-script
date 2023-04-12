@@ -1,5 +1,8 @@
-const { appendFileSync } = require('fs');
-const { inspect } = require('util');
+const { exec } = require('child_process');
+const { appendFile } = require('fs/promises');
+const { inspect, promisify } = require('util');
+
+const execAsync = promisify(exec);
 
 let isGlobalMode = false;
 // In npm and pnpm, global mode can be detected by reading the "npm_config_global" environment variable.
@@ -39,32 +42,44 @@ const postinstallType =
   process.argv
     .map((arg) => /^--type\s*=(.+)$/.exec(arg)?.[1].trim())
     .findLast(Boolean) ?? process.env.POSTINSTALL_TYPE;
-const envs = {
-  cwd: process.cwd(),
-  isGlobalMode,
-  ...Object.fromEntries(
-    Object.entries(process.env).filter(([key]) =>
-      /^(?:npm|yarn|pnpm|bun)_/i.test(key),
-    ),
-  ),
-};
-if (postinstallType) console.log(postinstallType);
-console.log(envs);
 
-const { GITHUB_STEP_SUMMARY } = process.env;
-if (GITHUB_STEP_SUMMARY)
-  appendFileSync(
-    GITHUB_STEP_SUMMARY,
-    [
-      `<details${Object.keys(envs).length < 30 ? ' open' : ''}>`,
-      ...(postinstallType ? [`<summary>${postinstallType}</summary>`] : []),
-      '',
-      '```js',
-      inspect(envs),
-      '```',
-      '',
-      '</details>',
-      '',
-      '',
-    ].join('\n'),
-  );
+(async () => {
+  const binCommand = isYarn1
+    ? `yarn ${isGlobalMode ? 'global ' : ''}bin`
+    : (process.env.npm_config_user_agent || '')?.startsWith('pnpm/')
+    ? `pnpm bin${isGlobalMode ? ' --global' : ''}`
+    : `npm bin${isGlobalMode ? ' --global' : ''}`;
+  const debugData = {
+    cwd: process.cwd(),
+    isGlobalMode,
+    [binCommand]: await execAsync(binCommand).catch((error) => ({ error })),
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(([key]) =>
+        /^(?:npm|yarn|pnpm|bun)_/i.test(key),
+      ),
+    ),
+  };
+  if (postinstallType) console.log(postinstallType);
+  console.log(debugData);
+
+  const { GITHUB_STEP_SUMMARY } = process.env;
+  if (GITHUB_STEP_SUMMARY)
+    await appendFile(
+      GITHUB_STEP_SUMMARY,
+      [
+        `<details${Object.keys(debugData.env).length < 30 ? ' open' : ''}>`,
+        ...(postinstallType ? [`<summary>${postinstallType}</summary>`] : []),
+        '',
+        '```js',
+        inspect(debugData),
+        '```',
+        '',
+        '</details>',
+        '',
+        '',
+      ].join('\n'),
+    );
+})().catch((error) => {
+  if (process.exitCode === 0) process.exitCode = 1;
+  console.error(error);
+});
