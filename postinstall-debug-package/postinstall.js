@@ -1,5 +1,6 @@
 const { exec } = require('child_process');
 const { appendFile } = require('fs/promises');
+const path = require('path');
 const { inspect, promisify } = require('util');
 
 const execAsync = promisify(exec);
@@ -43,12 +44,24 @@ const postinstallType =
     .map((arg) => /^--type\s*=(.+)$/.exec(arg)?.[1].trim())
     .findLast(Boolean) ?? process.env.POSTINSTALL_TYPE;
 
+function packageManagerCommand(commandName) {
+  const execpathIsJS =
+    process.env.npm_execpath &&
+    /\.[cm]?js$/.test(path.extname(process.env.npm_execpath));
+  return execpathIsJS
+    ? // Sometimes there are multiple versions of a package manager on a user's system, such as when using Corepack.
+      // In this case, the exec function may call another package manager that is in a different path than the running package manager.
+      // To avoid this, use the environment variable "npm_execpath".
+      `${process.execPath} ${process.env.npm_execpath}`
+    : commandName;
+}
+
 (async () => {
   const binCommand = isYarn1
-    ? `yarn ${isGlobalMode ? 'global ' : ''}bin`
+    ? `${packageManagerCommand('yarn')} ${isGlobalMode ? 'global ' : ''}bin`
     : (process.env.npm_config_user_agent || '')?.startsWith('pnpm/')
-    ? `pnpm bin${isGlobalMode ? ' --global' : ''}`
-    : `npm bin${isGlobalMode ? ' --global' : ''}`;
+    ? `${packageManagerCommand('pnpm')} bin${isGlobalMode ? ' --global' : ''}`
+    : `${packageManagerCommand('npm')} bin${isGlobalMode ? ' --global' : ''}`;
   const debugData = {
     cwd: process.cwd(),
     isGlobalMode,
