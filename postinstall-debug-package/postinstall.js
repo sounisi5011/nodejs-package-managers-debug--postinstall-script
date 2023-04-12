@@ -1,8 +1,9 @@
-const { execFile } = require('child_process');
+const { exec, execFile } = require('child_process');
 const { appendFile } = require('fs/promises');
 const path = require('path');
 const { inspect, promisify } = require('util');
 
+const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 let isGlobalMode = false;
@@ -60,6 +61,19 @@ function packageManagerCommand(commandName) {
     : [commandName];
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ */
+async function crossExec(command, args) {
+  if (process.platform !== 'win32' || path.isAbsolute(command)) {
+    return await execFileAsync(command, args);
+  }
+  // Note: This is bad code because it does not quote each argument.
+  //       However, this is not a problem because the arguments of the commands executed within this script do not need to be quoted.
+  return await execAsync([command, ...args].join(' '));
+}
+
 (async () => {
   const binCommand = isYarn1
     ? packageManagerCommand('yarn').concat(isGlobalMode ? 'global' : [], 'bin')
@@ -75,7 +89,7 @@ function packageManagerCommand(commandName) {
   const debugData = {
     cwd: process.cwd(),
     isGlobalMode,
-    [binCommand.join(' ')]: await execFileAsync(
+    [binCommand.join(' ')]: await crossExec(
       binCommand[0],
       binCommand.slice(1),
     ).catch((error) => ({ error })),
