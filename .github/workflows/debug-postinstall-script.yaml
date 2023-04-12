@@ -18,11 +18,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         package-manager:
-          - npm@1.4.29
-          - npm@2.15.12
-          - npm@3.10.10
-          - npm@4.6.1
-          - npm@5.10.0
+          # - npm@1.4.29  # Throws "Reference Error: primordials is not defined"
+          # - npm@2.15.12 # Throws "peerinvalid The package ajv@6.12.6 does not satisfy its siblings' peerDependencies requirements!"
+          # - npm@3.10.10 # Throws "cb.apply is not a function"
+          # - npm@4.6.1   # Throws "cb.apply is not a function"
+          # - npm@5.10.0  # Throws "cb.apply is not a function"
           - npm@6.14.18
           - npm@7.24.2
           - npm@8.19.4
@@ -31,12 +31,12 @@ jobs:
           - yarn@2.4.3
           - yarn@3.5.0
           - yarn@4.0.0-rc.42
-          - pnpm@1.43.1
-          - pnpm@2.25.7
-          - pnpm@3.8.1
-          - pnpm@4.14.4
-          - pnpm@5.18.10
-          - pnpm@6.35.1
+          # - pnpm@1.43.1  # Throws "Internal Error: Cannot find module '.../bin/pnpm.js'"
+          # - pnpm@2.25.7  # Throws "TypeError: cb.apply is not a function"
+          # - pnpm@3.8.1   # Throws "EACCES: permission denied, mkdir '/usr/local/pnpm-global'"
+          # - pnpm@4.14.4  # Throws "EACCES: permission denied, mkdir '/usr/local/pnpm-global'"
+          # - pnpm@5.18.10 # Throws "EACCES: permission denied, mkdir '/usr/local/pnpm-global'"
+          # - pnpm@6.35.1  # Throws "ELIFECYCLE  Command failed with exit code -4058. .../node_modules/foo postinstall: Failed"
           - pnpm@7.32.0
           - pnpm@8.2.0
           - bun@0.5.9
