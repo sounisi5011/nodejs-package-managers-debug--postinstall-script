@@ -110,16 +110,23 @@ jobs:
             echo "[command]$*" >&2
             "$@"
           }
+          unix_like_path() {
+            if [[ '${{ runner.os }}' == 'Windows' ]]; then
+              cygpath --unix "$1"
+            else
+              echo -n "$1"
+            fi
+          }
 
           exec_with_debug tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
           tarball_path="$(node -p 'require("path").resolve(process.argv[1])' '${{ env.tarball-path }}')"
-          tarball_name="$(basename "${tarball_path}")"
-          if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"; then
+          tarball_name="$(basename "$(unix_like_path "${tarball_path}")")"
+          if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "$(unix_like_path "${tarball_path}")"; then
             tarball_path='${{ runner.temp }}/'"${tarball_name}"
-            if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"; then
+            if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "$(unix_like_path "${tarball_path}")"; then
               tarball_path="$HOME/${tarball_name}"
-              exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"
+              exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "$(unix_like_path "${tarball_path}")"
             fi
           fi
           echo "tarball-path=${tarball_path}" >> "${GITHUB_ENV}"
