@@ -112,30 +112,28 @@ jobs:
           }
           resolve_path() {
             node -p '
-              const { readFileSync } = require("fs");
               const path = require("path");
 
               // On Windows, if a string starting with a slash is passed as an argument, the slash is replaced with "C:/Program Files/Git/".
-              // To avoid this, tarball_path is passed from stdin.
-              const stdin = readFileSync(0, "utf8");
+              // To avoid this, add a dummy character "X" at the beginning of each argument and remove it here.
+              const args = process.argv.slice(1).map(arg => arg.substring(1));
               /// DEBUG ///
               console.warn({
-                stdin,
-                args: process.argv.slice(1),
+                args,
               });
               /// DEBUG ///
 
               // To convert a path like "/root-name" to an absolute path with a Windows drive letter,
               // it is necessary to pass "process.cwd()" as the first argument to the "path.resolve()" function.
-              path.resolve(process.cwd(), stdin.trim())
-            ' "$@"
+              path.resolve(process.cwd(), ...args)
+            ' "${@/#/X}"
           }
 
           exec_with_debug tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
-          orig_tarball_path="$(echo './${{ needs.setup.outputs.tarball-name }}' | resolve_path './${{ needs.setup.outputs.tarball-name }}')"
+          orig_tarball_path="$(resolve_path './${{ needs.setup.outputs.tarball-name }}')"
           for tarball_path in '${{ env.tarball-path }}' ${{ runner.os == 'Windows' && format('''{0}''', runner.temp) || '~' }}/"$(basename '${{ env.tarball-path }}')"; do
-            tarball_path="$(echo "${tarball_path}" | resolve_path "${tarball_path}")"
+            tarball_path="$(resolve_path "${tarball_path}")"
             if exec_with_debug mv "${orig_tarball_path}" "${tarball_path}"; then
               break
             fi
