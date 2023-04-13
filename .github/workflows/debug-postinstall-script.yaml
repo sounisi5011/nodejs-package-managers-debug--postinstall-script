@@ -122,11 +122,6 @@ jobs:
             while (rootDir !== (rootDir = path.dirname(rootDir)));
             path.resolve(rootDir, path.basename(targetPath))
           ' "./${tarball_name}")"
-          ##### DEBUG #####
-          echo "tarball_path: '${tarball_path}'"
-          echo "temp_dir: '${temp_dir}'"
-          echo "HOME: '${HOME}'"
-          ##### DEBUG #####
           if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"; then
             tarball_path="${temp_dir}/${tarball_name}"
             if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"; then
