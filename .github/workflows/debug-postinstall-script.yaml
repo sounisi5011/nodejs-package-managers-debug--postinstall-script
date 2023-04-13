@@ -146,6 +146,29 @@ jobs:
             const path = require('path');
             const { inspect } = require('util');
 
+            function indentStr(str, prefix, firstPrefix='') {
+              if (typeof prefix !== 'number' && typeof prefix !== 'string')
+                prefix = String(prefix);
+              if (typeof firstPrefix !== 'string')
+                firstPrefix = String(firstPrefix);
+
+              const indentLength = Math.max(
+                typeof prefix === 'number' ? prefix : prefix.length,
+                firstPrefix.length,
+              );
+              const prefixStr = typeof prefix === 'number'
+                ? ' '.repeat(indentLength)
+                : prefix + ' '.repeat(indentLength - prefix.length);
+              const firstPrefixStr = firstPrefix
+                ? firstPrefix + ' '.repeat(indentLength - firstPrefix.length)
+                : prefixStr;
+
+              return str.replace(
+                /^(?!$)/gms,
+                (_, offset) => offset === 0 ? firstPrefixStr : prefixStr,
+              );
+            }
+
             const tarballFullpath = await core.group('Move debugger package tarball', async () => {
               const rootDir = path.resolve(process.cwd(), '/');
               const dirList = [rootDir, os.homedir(), process.env.RUNNER_TEMP_DIR];
@@ -229,13 +252,15 @@ jobs:
                 GITHUB_STEP_SUMMARY,
                 [
                   '```js',
-                  '// Files in ' + (
-                    0 < prefixEnvEntries.length
-                      ? prefixEnvEntries
+                  indentStr(
+                    [binDir]
+                      .concat(
+                        prefixEnvEntries
                           .map(([key, value]) => binDir.replace(value, `$${key}`))
-                          .join(' / ')
-                        + ` ( ${binDir} )`
-                      : binDir
+                      )
+                      .join('\n'),
+                    '// ',
+                    '// Files in ',
                   ),
                   inspect(await fs.readdir(binDir).catch(error => error)),
                   '```',
@@ -326,7 +351,10 @@ jobs:
                   GITHUB_STEP_SUMMARY,
                   [
                     '```js',
-                    `// Files in ${binDir.replace(npm_config_prefix, '$npm_config_prefix')} ( ${binDir} )`,
+                    indentStr([
+                      binDir,
+                      binDir.replace(npm_config_prefix, '$npm_config_prefix'),
+                    ].join('\n'), '// ', '// Files in '),
                     await inspectInstalledBin(binDir),
                     '```',
                     '',
