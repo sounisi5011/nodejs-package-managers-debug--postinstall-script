@@ -144,6 +144,7 @@ jobs:
             const fs = require('fs/promises');
             const os = require('os');
             const path = require('path');
+            const { inspect } = require('util');
 
             const tarballFullpath = await core.group('Move debugger package tarball', async () => {
               const rootDir = path.resolve(process.cwd(), '/');
@@ -205,6 +206,21 @@ jobs:
               await exec.exec('pnpm add', [tarballPath], { env });
             } else if (pmType === 'bun') {
               await exec.exec('bun add', [tarballPath], { env });
+            }
+            {
+              const { GITHUB_STEP_SUMMARY } = process.env;
+              const binDir = path.resolve(process.cwd(), 'node_modules/.bin');
+              await fs.appendFile(
+                GITHUB_STEP_SUMMARY,
+                [
+                  '```js',
+                  `// Files in ${binDir}`,
+                  inspect(await fs.readdir(binDir).catch(error => error)),
+                  '```',
+                  '',
+                  '',
+                ].join('\n'),
+              );
             }
 
             env.POSTINSTALL_TYPE = 'Global Dependencies';
