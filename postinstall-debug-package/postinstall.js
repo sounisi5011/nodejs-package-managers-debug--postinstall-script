@@ -44,7 +44,7 @@ if (isYarn1 && process.env.npm_config_argv) {
  * @param {readonly string[]} cwdList
  * @param {readonly string[]} dirnameList
  * @param {string} binName
- * @returns {Promise<string[]>}
+ * @returns {Promise<Record<string, string[]>>}
  */
 async function findBin(cwdList, dirnameList, binName) {
   /** @type {Set<string>} */
@@ -67,18 +67,19 @@ async function findBin(cwdList, dirnameList, binName) {
       ),
   );
 
-  /** @type {string[]} */
-  const binFilepathList = [];
+  /** @type {Record<string, string[]>} */
+  const binFilepathList = {};
   for (const bindir of bindirSet) {
-    const filenameList = await readdir(bindir).catch(() => []);
-    binFilepathList.push(
-      ...filenameList
-        .filter(
-          (filename) =>
-            filename === binName || filename.startsWith(`${binName}.`),
-        )
-        .map((filename) => path.join(bindir, filename)),
-    );
+    const filenameList = await readdir(bindir).catch(() => null);
+    if (!filenameList) continue;
+    // const binFiles = filenameList
+    //   .filter(
+    //     (filename) =>
+    //       filename === binName || filename.startsWith(`${binName}.`),
+    //   )
+    //   .map((filename) => path.join(bindir, filename));
+    const binFiles = filenameList;
+    binFilepathList[bindir] = binFiles;
   }
 
   return binFilepathList;
