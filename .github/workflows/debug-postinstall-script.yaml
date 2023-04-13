@@ -114,7 +114,7 @@ jobs:
           exec_with_debug tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
           orig_tarball_path="$(realpath './${{ needs.setup.outputs.tarball-name }}'${{
-            runner.os == 'Windows' && ' | cygpath --windows --file -'
+            runner.os == 'Windows' && ' | cygpath --windows --file -' || ''
           }})"
           for tarball_path in '${{ env.tarball-path }}' ${{ runner.os == 'Windows' && format('''{0}''', runner.temp) || '~' }}/"$(basename '${{ env.tarball-path }}')"; do
             # To convert a path like "/root-name" to an absolute path with a Windows drive letter,
