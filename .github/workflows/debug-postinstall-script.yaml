@@ -114,7 +114,7 @@ jobs:
           exec_with_debug tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
           temp_dir='${{ runner.temp }}'
-          tarball_path="$(node -p 'require("path").resolve(...process.argv.slice(1))' "${temp_dir}" '${{ env.tarball-path }}')"
+          tarball_path="$(node -e 'const res = require("path").resolve(...process.argv.slice(1)); console.error({ args: process.argv.slice(1), res }); console.log(res)' "${temp_dir}" '${{ env.tarball-path }}')"
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             tarball_path="$(cygpath --unix "${tarball_path}")"
             temp_dir="$(cygpath --unix "${temp_dir}")"
