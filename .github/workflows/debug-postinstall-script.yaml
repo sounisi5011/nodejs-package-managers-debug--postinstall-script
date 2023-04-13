@@ -224,6 +224,10 @@ jobs:
             }
 
             env.POSTINSTALL_TYPE = 'Global Dependencies';
+            env.DEBUG_DATA_JSON_PATH = path.join(
+              await fs.mkdtemp(os.tmpdir() + path.sep),
+              'debug-data.json',
+            );
             if (pmType === 'npm') {
               await exec.exec('npm install --global', [tarballPath], { env });
             } else if (pmType === 'yarn') {
@@ -255,6 +259,30 @@ jobs:
               });
             } else if (pmType === 'bun') {
               await exec.exec('bun add --global', [path.resolve(tarballPath)], { env });
+            }
+            {
+              const { GITHUB_STEP_SUMMARY } = process.env;
+              const { binDir } = (
+                await fs.readFile(env.DEBUG_DATA_JSON_PATH, 'utf8')
+                  .then(JSON.parse)
+                  .catch(error => {
+                    if (error.code === 'ENOENT') return {};
+                    throw error;
+                  })
+              );
+              if (binDir) {
+                await fs.appendFile(
+                  GITHUB_STEP_SUMMARY,
+                  [
+                    '```js',
+                    `// Files in ${binDir}`,
+                    inspect(await fs.readdir(binDir).catch(error => error)),
+                    '```',
+                    '',
+                    '',
+                  ].join('\n'),
+                );
+              }
             }
 
   # Successfully complete this job when all jobs have been completed.

@@ -1,5 +1,5 @@
 const { exec, execFile } = require('child_process');
-const { appendFile, readdir, readFile } = require('fs/promises');
+const { appendFile, readdir, readFile, writeFile } = require('fs/promises');
 const path = require('path');
 const { inspect, promisify } = require('util');
 
@@ -140,12 +140,11 @@ async function crossExec(command, args) {
     binCommand[0],
     binCommand.slice(1),
   ).catch((error) => ({ error }));
+  const binDir =
+    'stdout' in binCommandResult ? binCommandResult.stdout.trim() : null;
   const binFilepathList = binName
     ? await findBin(
-        [cwd].concat(
-          ('stdout' in binCommandResult && binCommandResult.stdout.trim()) ||
-            [],
-        ),
+        [cwd].concat(binDir || []),
         isGlobalMode
           ? // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
             ['bin', '']
@@ -154,6 +153,7 @@ async function crossExec(command, args) {
         binName,
       )
     : undefined;
+
   const debugData = {
     cwd,
     isGlobalMode,
@@ -168,7 +168,7 @@ async function crossExec(command, args) {
   if (postinstallType) console.log(postinstallType);
   console.log(debugData);
 
-  const { GITHUB_STEP_SUMMARY } = process.env;
+  const { GITHUB_STEP_SUMMARY, DEBUG_DATA_JSON_PATH } = process.env;
   if (GITHUB_STEP_SUMMARY)
     await appendFile(
       GITHUB_STEP_SUMMARY,
@@ -184,6 +184,16 @@ async function crossExec(command, args) {
         '',
         '',
       ].join('\n'),
+    );
+  if (DEBUG_DATA_JSON_PATH)
+    await writeFile(
+      DEBUG_DATA_JSON_PATH,
+      JSON.stringify({
+        cwd,
+        binDir,
+        isGlobalMode,
+        binName: binName ?? null,
+      }),
     );
 })().catch((error) => {
   if (!process.exitCode) process.exitCode = 1;
