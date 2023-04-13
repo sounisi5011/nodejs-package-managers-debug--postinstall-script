@@ -115,14 +115,12 @@ jobs:
 
           temp_dir='${{ runner.temp }}'
           tarball_name="$(basename '${{ env.tarball-path }}')"
-          tarball_path="$(node -e '
+          tarball_path="$(node -p '
             const path = require("path")
             const targetPath = path.resolve(process.argv[process.argv.length - 1]);
             let rootDir = targetPath;
             while (rootDir !== (rootDir = path.dirname(rootDir)));
-            const res = path.resolve(rootDir, path.basename(targetPath));
-            console.error({ args: process.argv.slice(1), res });
-            console.log(res);
+            path.resolve(rootDir, path.basename(targetPath))
           ' "./${tarball_name}")"
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             tarball_path="$(cygpath --unix "${tarball_path}")"
