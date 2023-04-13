@@ -262,7 +262,7 @@ jobs:
             }
             {
               const { GITHUB_STEP_SUMMARY } = process.env;
-              const { binDir } = (
+              const { binDir, binName } = (
                 await fs.readFile(env.DEBUG_DATA_JSON_PATH, 'utf8')
                   .then(JSON.parse)
                   .catch(error => {
@@ -276,7 +276,15 @@ jobs:
                   [
                     '```js',
                     `// Files in ${binDir}`,
-                    inspect(await fs.readdir(binDir).catch(error => error)),
+                    inspect(
+                      await fs.readdir(binDir)
+                        .then(files => files.filter(file =>
+                          !binName
+                          || file === binName
+                          || file.startsWith(`${binName}.`)
+                        ))
+                        .catch(error => error),
+                    ),
                     '```',
                     '',
                     '',
