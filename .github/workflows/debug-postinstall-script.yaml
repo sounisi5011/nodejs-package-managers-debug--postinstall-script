@@ -117,17 +117,12 @@ jobs:
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             orig_tarball_path="$(cygpath --windows "${orig_tarball_path}")"
           fi
-          root_dir="$(node -p '
-            const path = require("path");
-            let rootDir = process.cwd();
-            while (rootDir !== (rootDir = path.dirname(rootDir)));
-            rootDir
-          ')"
+          # shellcheck disable=SC2034
           tarball_name="$(basename '${{ env.tarball-path }}')"
-          for tarball_path in "${root_dir}/${tarball_name}" ${{ runner.os == 'Windows' && format('''{0}''{1}', runner.temp, '"/${tarball_name}"') || '"$HOME/${tarball_name}"' }}; do
-            if [[ '${{ runner.os }}' == 'Windows' ]]; then
-              tarball_path="$(cygpath --windows "${tarball_path}")"
-            fi
+          for tarball_path in '${{ env.tarball-path }}' ${{ runner.os == 'Windows' && format('''{0}''{1}', runner.temp, '"/${tarball_name}"') || '"$HOME/${tarball_name}"' }}; do
+            # To convert a path like "/root-name" to an absolute path with a Windows drive letter,
+            # it is necessary to pass "process.cwd()" as the first argument to the "path.resolve()" function.
+            tarball_path="$(node -p 'require("path").resolve(process.cwd(), ...process.argv.slice(1))' "${tarball_path}")"
             if exec_with_debug mv "${orig_tarball_path}" "${tarball_path}"; then
               break
             fi
