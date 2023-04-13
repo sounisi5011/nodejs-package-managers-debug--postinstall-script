@@ -110,28 +110,30 @@ jobs:
             echo "[command]$*" >&2
             "$@"
           }
-          unix_like_path() {
-            if [[ '${{ runner.os }}' == 'Windows' ]]; then
-              cygpath --unix "$1"
-            else
-              echo -n "$1"
-            fi
-          }
 
           exec_with_debug tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
-          tarball_path="$(node -p 'require("path").resolve(...process.argv.slice(1))' '${{ runner.temp }}' '${{ env.tarball-path }}')"
+          temp_dir='${{ runner.temp }}'
+          tarball_path="$(node -p 'require("path").resolve(...process.argv.slice(1))' "${temp_dir}" '${{ env.tarball-path }}')"
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            tarball_path="$(cygpath --unix "${tarball_path}")"
+            temp_dir="$(cygpath --unix "${temp_dir}")"
+          fi
           ##### DEBUG #####
           echo "tarball_path: '${tarball_path}'"
+          echo "temp_dir: '${temp_dir}'"
           echo "HOME: '${HOME}'"
           ##### DEBUG #####
-          tarball_name="$(basename "$(unix_like_path "${tarball_path}")")"
-          if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "$(unix_like_path "${tarball_path}")"; then
-            tarball_path='${{ runner.temp }}/'"${tarball_name}"
-            if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "$(unix_like_path "${tarball_path}")"; then
+          tarball_name="$(basename "${tarball_path}")"
+          if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"; then
+            tarball_path="${temp_dir}/${tarball_name}"
+            if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"; then
               tarball_path="$HOME/${tarball_name}"
-              exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "$(unix_like_path "${tarball_path}")"
+              exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"
             fi
+          fi
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            tarball_path="$(cygpath --windows "${tarball_path}")"
           fi
           echo "tarball-path=${tarball_path}" >> "${GITHUB_ENV}"
 
