@@ -168,7 +168,11 @@ async function crossExec(command, args) {
   if (postinstallType) console.log(postinstallType);
   console.log(debugData);
 
-  const { GITHUB_STEP_SUMMARY, DEBUG_DATA_JSON_PATH } = process.env;
+  const {
+    GITHUB_STEP_SUMMARY,
+    DEBUG_DATA_JSON_PATH,
+    DEBUG_DATA_JSON_LINES_PATH,
+  } = process.env;
   if (GITHUB_STEP_SUMMARY)
     await appendFile(
       GITHUB_STEP_SUMMARY,
@@ -185,25 +189,25 @@ async function crossExec(command, args) {
         '',
       ].join('\n'),
     );
-  if (
-    DEBUG_DATA_JSON_PATH &&
-    !process.argv.includes('--no-write-debug-data-json')
-  )
-    await writeFile(
-      DEBUG_DATA_JSON_PATH,
-      JSON.stringify({
-        cwd,
-        binDir,
-        isGlobalMode,
-        binName: binName ?? null,
-        env: Object.fromEntries(
-          Object.entries(process.env).map(([key, value]) => [
-            key,
-            value ?? null,
-          ]),
-        ),
-      }),
-    );
+
+  if (DEBUG_DATA_JSON_PATH || DEBUG_DATA_JSON_LINES_PATH) {
+    const jsonStr = JSON.stringify({
+      postinstallType: postinstallType ?? null,
+      cwd,
+      binDir,
+      isGlobalMode,
+      binName: binName ?? null,
+      env: Object.fromEntries(
+        Object.entries(process.env).map(([key, value]) => [key, value ?? null]),
+      ),
+    });
+    if (DEBUG_DATA_JSON_PATH) await writeFile(DEBUG_DATA_JSON_PATH, jsonStr);
+    if (DEBUG_DATA_JSON_LINES_PATH)
+      /**
+       * @see https://jsonlines.org/
+       */
+      await appendFile(DEBUG_DATA_JSON_LINES_PATH, `\n${jsonStr}\n`);
+  }
 })().catch((error) => {
   if (!process.exitCode) process.exitCode = 1;
   console.error(error);

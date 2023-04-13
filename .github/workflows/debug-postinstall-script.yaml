@@ -40,7 +40,7 @@ jobs:
             }
           )
           {
-            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project --no-write-debug-data-json"'
+            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project"'
           } > ./package.json
 
           find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
@@ -146,6 +146,26 @@ jobs:
             const path = require('path');
             const { inspect } = require('util');
 
+            /**
+             * @see https://jsonlines.org/
+             */
+            function parseJsonLines(jsonLinesText) {
+              let valueCount = 0;
+              return jsonLinesText
+                .split('\n')
+                .flatMap((jsonText, index) => {
+                  // see https://www.rfc-editor.org/rfc/rfc8259#section-2:~:text=ws%20=,carriage%20return
+                  if (!/[^ \t\n\r]/.test(jsonText)) return [];
+                  valueCount++;
+
+                  try {
+                    return [JSON.parse(jsonText)];
+                  } catch (error) {
+                    error.message += ` in line ${index + 1} (value ${valueCount})`;
+                    throw error;
+                  }
+                });
+            }
             function indentStr(str, prefix, firstPrefix='') {
               if (typeof prefix !== 'number' && typeof prefix !== 'string')
                 prefix = String(prefix);
@@ -216,9 +236,9 @@ jobs:
             let env = {
               ...process.env,
               POSTINSTALL_TYPE: 'Local Dependencies',
-              DEBUG_DATA_JSON_PATH: path.join(
+              DEBUG_DATA_JSON_LINES_PATH: path.join(
                 await fs.mkdtemp(os.tmpdir() + path.sep),
-                'debug-data.json',
+                'debug-data.jsonl',
               ),
             };
             if (pmType === 'npm') {
@@ -238,8 +258,15 @@ jobs:
               const { GITHUB_STEP_SUMMARY } = process.env;
               const binDir = path.resolve(process.cwd(), 'node_modules/.bin');
               const debugData = (
-                await fs.readFile(env.DEBUG_DATA_JSON_PATH, 'utf8')
-                  .then(JSON.parse)
+                await fs.readFile(env.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
+                  .then(parseJsonLines)
+                  .then(debugDataList => (
+                    debugDataList.find(({ postinstallType }) => postinstallType === env.POSTINSTALL_TYPE)
+                    // Bun does not execute the "postinstall" script of installed dependencies.
+                    // Instead, it uses the debug data from the project's "postinstall" script.
+                    ?? debugDataList.find(({ postinstallType }) => pmType === 'bun' && /^Project$/i.test(postinstallType))
+                    ?? {}
+                  ))
                   .catch(error => ({}))
               );
               const prefixEnvEntries = Object.entries(debugData.env ?? {})
@@ -306,8 +333,12 @@ jobs:
             {
               const { GITHUB_STEP_SUMMARY } = process.env;
               const { binDir, binName, ...debugData } = (
-                await fs.readFile(env.DEBUG_DATA_JSON_PATH, 'utf8')
-                  .then(JSON.parse)
+                await fs.readFile(env.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
+                  .then(parseJsonLines)
+                  .then(debugDataList => (
+                    debugDataList.find(({ postinstallType }) => postinstallType === env.POSTINSTALL_TYPE)
+                    ?? {}
+                  ))
                   .catch(error => {
                     if (error.code === 'ENOENT') return {};
                     throw error;
