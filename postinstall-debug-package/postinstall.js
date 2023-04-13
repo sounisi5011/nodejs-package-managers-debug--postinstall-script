@@ -1,5 +1,5 @@
 const { exec, execFile } = require('child_process');
-const { appendFile } = require('fs/promises');
+const { appendFile, readdir, readFile } = require('fs/promises');
 const path = require('path');
 const { inspect, promisify } = require('util');
 
@@ -40,6 +40,50 @@ if (isYarn1 && process.env.npm_config_argv) {
 // The "yarn global add" command has been replaced with the "yarn dlx" command.
 // see https://yarnpkg.com/getting-started/migration#use-yarn-dlx-instead-of-yarn-global
 
+/**
+ * @param {readonly string[]} cwdList
+ * @param {readonly string[]} dirnameList
+ * @param {string} binName
+ * @returns {Promise<string[]>}
+ */
+async function findBin(cwdList, dirnameList, binName) {
+  /** @type {Set<string>} */
+  const bindirSet = new Set(
+    cwdList
+      .flatMap((cwd) => {
+        /** @type {string[]} */
+        const cwdList = [];
+        while (true) {
+          cwdList.push(cwd);
+          const parentDir = path.dirname(cwd);
+          if (parentDir === cwd) break;
+          cwd = parentDir;
+        }
+        return cwdList;
+      })
+      .sort()
+      .flatMap((cwd) =>
+        dirnameList.map((dirname) => (dirname ? path.join(cwd, dirname) : cwd)),
+      ),
+  );
+
+  /** @type {string[]} */
+  const binFilepathList = [];
+  for (const bindir of bindirSet) {
+    const filenameList = await readdir(bindir).catch(() => []);
+    binFilepathList.push(
+      ...filenameList
+        .filter(
+          (filename) =>
+            filename === binName || filename.startsWith(`${binName}.`),
+        )
+        .map((filename) => path.join(bindir, filename)),
+    );
+  }
+
+  return binFilepathList;
+}
+
 const postinstallType =
   process.argv
     .map((arg) => /^--type\s*=(.+)$/.exec(arg)?.[1].trim())
@@ -75,6 +119,12 @@ async function crossExec(command, args) {
 }
 
 (async () => {
+  const cwd = process.cwd();
+  const pkg = await readFile(path.resolve(__dirname, 'package.json'), 'utf8')
+    .then((v) => JSON.parse(v))
+    .catch(() => undefined);
+  const binName = Object.keys(pkg?.bin ?? {})[0];
+
   const binCommand = isYarn1
     ? packageManagerCommand('yarn').concat(isGlobalMode ? 'global' : [], 'bin')
     : (process.env.npm_config_user_agent || '')?.startsWith('pnpm/')
@@ -86,13 +136,29 @@ async function crossExec(command, args) {
         'bin',
         isGlobalMode ? '--global' : [],
       );
+  const binCommandResult = await crossExec(
+    binCommand[0],
+    binCommand.slice(1),
+  ).catch((error) => ({ error }));
+  const binFilepathList = binName
+    ? await findBin(
+        [cwd].concat(
+          ('stdout' in binCommandResult && binCommandResult.stdout.trim()) ||
+            [],
+        ),
+        isGlobalMode
+          ? // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
+            ['bin', '']
+          : // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
+            ['node_modules/.bin'],
+        binName,
+      )
+    : undefined;
   const debugData = {
-    cwd: process.cwd(),
+    cwd,
     isGlobalMode,
-    [binCommand.join(' ')]: await crossExec(
-      binCommand[0],
-      binCommand.slice(1),
-    ).catch((error) => ({ error })),
+    realBin: binFilepathList,
+    [binCommand.join(' ')]: binCommandResult,
     env: Object.fromEntries(
       Object.entries(process.env).filter(([key]) =>
         /^(?:npm|yarn|pnpm|bun)_/i.test(key),
