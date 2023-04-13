@@ -94,8 +94,6 @@ jobs:
           - package-manager: bun@0.5.9
             os: windows-latest
     runs-on: ${{ matrix.os }}
-    env:
-      tarball-path: /debugger-package.tgz
     steps:
       - name: Download debug package
         uses: actions/download-artifact@v3
@@ -105,38 +103,7 @@ jobs:
 
       - name: Restore debug package
         shell: bash
-        run: |
-          exec_with_debug() {
-            echo "[command]$*" >&2
-            "$@"
-          }
-          resolve_path() {
-            node -p '
-              const path = require("path");
-
-              // On Windows, if a string starting with a slash is passed as an argument, the slash is replaced with "C:/Program Files/Git/".
-              // To avoid this, add a dummy character "X" at the beginning of each argument and remove it here.
-              const args = process.argv.slice(1).map(arg => arg.substring(1));
-
-              // To convert a path like "/root-name" to an absolute path with a Windows drive letter,
-              // it is necessary to pass "process.cwd()" as the first argument to the "path.resolve()" function.
-              path.resolve(process.cwd(), ...args)
-            ' "${@/#/X}"
-          }
-
-          exec_with_debug tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
-
-          orig_tarball_path="$(resolve_path './${{ needs.setup.outputs.tarball-name }}')"
-          for tarball_path in '${{ env.tarball-path }}' ${{ runner.os == 'Windows' && format('''{0}''', runner.temp) || '~' }}/"$(basename '${{ env.tarball-path }}')"; do
-            tarball_path="$(resolve_path "${tarball_path}")"
-            if exec_with_debug mv "${orig_tarball_path}" "${tarball_path}"; then
-              break
-            fi
-          done
-          if [[ ! -f "${tarball_path}" ]]; then
-            tarball_path="${orig_tarball_path}"
-          fi
-          echo "tarball-path=${tarball_path}" >> "${GITHUB_ENV}"
+        run: tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
       - name: Install Bun
         if: startsWith(matrix.package-manager, 'bun@')
@@ -170,11 +137,41 @@ jobs:
       - name: Run install
         uses: actions/github-script@v6
         env:
-          TARBALL_PATH: ${{ env.tarball-path }}
+          RUNNER_TEMP_DIR: ${{ runner.temp }}
+          TARBALL_PATH: ./${{ needs.setup.outputs.tarball-name }}
         with:
           script: |
             const os = require('os');
             const path = require('path');
+
+            const tarballFullpath = await core.group('Move debugger package tarball', async () => {
+              const rootDir = path.resolve(process.cwd(), '/');
+              const dirList = [rootDir, os.homedir(), process.env.RUNNER_TEMP_DIR];
+              const tarballPathList = dirList
+                .map(dir => path.resolve(dir, 'debugger-package.tgz'))
+                // Exclude paths that belong to different drive letters
+                .filter(filepath => filepath.startsWith(rootDir))
+                // Sort by shortest filepath
+                .sort((a, b) => a.length - b.length);
+              const origTarballPath = path.resolve(process.env.TARBALL_PATH);
+              console.log({
+                origTarballPath,
+                tarballPathList,
+              });
+
+              for (const tarballPath of tarballPathList) {
+                try {
+                  await io.mv(origTarballPath, tarballPath, { force: false });
+                  console.log({ tarballPath });
+                  return tarballPath;
+                } catch (error) {
+                  console.error(error);
+                }
+              }
+
+              console.log({ tarballPath: origTarballPath });
+              return origTarballPath;
+            });
 
             const packageManager = '${{ matrix.package-manager }}';
             const pmType = packageManager.replace(/@.+$/s, '');
@@ -190,7 +187,7 @@ jobs:
               });
             }
 
-            const tarballPath = path.relative(process.cwd(), process.env.TARBALL_PATH);
+            const tarballPath = path.relative(process.cwd(), tarballFullpath);
             let env = {
               ...process.env,
               POSTINSTALL_TYPE: 'Local Dependencies',
