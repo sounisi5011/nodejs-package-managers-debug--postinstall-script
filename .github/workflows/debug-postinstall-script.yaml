@@ -262,7 +262,7 @@ jobs:
             }
             {
               const { GITHUB_STEP_SUMMARY } = process.env;
-              const { binDir, binName } = (
+              const { binDir, binName, ...debugData } = (
                 await fs.readFile(env.DEBUG_DATA_JSON_PATH, 'utf8')
                   .then(JSON.parse)
                   .catch(error => {
@@ -270,27 +270,46 @@ jobs:
                     throw error;
                   })
               );
+              async function inspectInstalledBin(bindirPath) {
+                return await fs.readdir(bindirPath)
+                  .then(files => {
+                    const { binFiles = [], otherFiles = [] } = files.reduce(
+                      ({ binFiles = [], otherFiles = [] }, file) => {
+                        const isInstalledBin = !binName || file === binName || file.startsWith(`${binName}.`);
+                        (isInstalledBin ? binFiles : otherFiles).push(file);
+                        return { binFiles, otherFiles };
+                      },
+                      {},
+                    );
+                    return inspect(binFiles.concat(otherFiles), {
+                      maxArrayLength: binFiles.length,
+                    });
+                  })
+                  .catch(error => inspect(error));
+              }
               if (binDir) {
                 await fs.appendFile(
                   GITHUB_STEP_SUMMARY,
                   [
                     '```js',
                     `// Files in ${binDir}`,
-                    await fs.readdir(binDir)
-                      .then(files => {
-                        const { binFiles = [], otherFiles = [] } = files.reduce(
-                          ({ binFiles = [], otherFiles = [] }, file) => {
-                            const isInstalledBin = !binName || file === binName || file.startsWith(`${binName}.`);
-                            (isInstalledBin ? binFiles : otherFiles).push(file);
-                            return { binFiles, otherFiles };
-                          },
-                          {},
-                        );
-                        return inspect(binFiles.concat(otherFiles), {
-                          maxArrayLength: binFiles.length,
-                        });
-                      })
-                      .catch(error => inspect(error)),
+                    await inspectInstalledBin(binDir),
+                    '```',
+                    '',
+                    '',
+                  ].join('\n'),
+                );
+              } else if (debugData.env?.npm_config_prefix) {
+                const { npm_config_prefix } = debugData.env;
+                const binDir = process.platform === 'win32'
+                  ? npm_config_prefix
+                  : path.join(npm_config_prefix, 'bin');
+                await fs.appendFile(
+                  GITHUB_STEP_SUMMARY,
+                  [
+                    '```js',
+                    `// Files in ${binDir.replace(npm_config_prefix, '$npm_config_prefix')} ( ${binDir} )`,
+                    await inspectInstalledBin(binDir),
                     '```',
                     '',
                     '',

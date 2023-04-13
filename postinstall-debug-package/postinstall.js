@@ -193,6 +193,12 @@ async function crossExec(command, args) {
         binDir,
         isGlobalMode,
         binName: binName ?? null,
+        env: Object.fromEntries(
+          Object.entries(process.env).map(([key, value]) => [
+            key,
+            value ?? null,
+          ]),
+        ),
       }),
     );
 })().catch((error) => {
