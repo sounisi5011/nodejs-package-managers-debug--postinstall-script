@@ -233,6 +233,18 @@ jobs:
             } else if (pmType === 'yarn') {
               if (packageManager.startsWith('yarn@1.')) {
                 await exec.exec('yarn global add', [tarballPath], { env });
+                ///// DEBUG /////
+                if (process.platform === 'win32') {
+                  const dir = String.raw`C:\npm\prefix`;
+                  console.log(
+                    await fs.readdir(dir, { withFileTypes: true })
+                      .then(files => ({
+                        [dir]: files.map(file => file.name + (file.isDirectory() ? path.sep : '')),
+                      }))
+                      .catch(error => error),
+                  );
+                }
+                ///// DEBUG /////
               } else {
                 // Note: On Windows, the "yarn dlx --package" command does not know the local filepath
                 // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
