@@ -196,7 +196,11 @@ jobs:
             if (pmType === 'npm') {
               await exec.exec('npm install', [tarballPath], { env });
             } else if (pmType === 'yarn') {
-              await exec.exec('yarn add', [tarballPath], { env });
+              if (packageManager.startsWith('yarn@1.')) {
+                await exec.exec('yarn add', [tarballPath], { env });
+              } else {
+                await exec.exec('yarn add', [tarballPath.replaceAll(path.sep, '/')], { env });
+              }
             } else if (pmType === 'pnpm') {
               await exec.exec('pnpm add', [tarballPath], { env });
             } else if (pmType === 'bun') {
