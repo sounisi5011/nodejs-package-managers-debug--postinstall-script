@@ -141,6 +141,7 @@ jobs:
           TARBALL_PATH: ./${{ needs.setup.outputs.tarball-name }}
         with:
           script: |
+            const fs = require('fs/promises');
             const os = require('os');
             const path = require('path');
 
@@ -161,7 +162,7 @@ jobs:
 
               for (const tarballPath of tarballPathList) {
                 try {
-                  await io.mv(origTarballPath, tarballPath, { force: false });
+                  await fs.rename(origTarballPath, tarballPath);
                   console.log({ tarballPath });
                   return tarballPath;
                 } catch (error) {
