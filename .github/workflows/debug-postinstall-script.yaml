@@ -40,7 +40,7 @@ jobs:
             }
           )
           {
-            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project"'
+            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project --no-write-debug-data-json"'
           } > ./package.json
 
           find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
@@ -193,6 +193,10 @@ jobs:
             let env = {
               ...process.env,
               POSTINSTALL_TYPE: 'Local Dependencies',
+              DEBUG_DATA_JSON_PATH: path.join(
+                await fs.mkdtemp(os.tmpdir() + path.sep),
+                'debug-data.json',
+              ),
             };
             if (pmType === 'npm') {
               await exec.exec('npm install', [tarballPath], { env });
@@ -210,11 +214,29 @@ jobs:
             {
               const { GITHUB_STEP_SUMMARY } = process.env;
               const binDir = path.resolve(process.cwd(), 'node_modules/.bin');
+              const debugData = (
+                await fs.readFile(env.DEBUG_DATA_JSON_PATH, 'utf8')
+                  .then(JSON.parse)
+                  .catch(error => ({}))
+              );
+              const prefixEnvEntries = Object.entries(debugData.env ?? {})
+                .filter(([, value]) => (
+                  value
+                  && !/^(?:[A-Z]:)?[/\\]$/i.test(value)
+                  && binDir.startsWith(value)
+                ));
               await fs.appendFile(
                 GITHUB_STEP_SUMMARY,
                 [
                   '```js',
-                  `// Files in ${binDir}`,
+                  '// Files in ' + (
+                    0 < prefixEnvEntries.length
+                      ? prefixEnvEntries
+                          .map(([key, value]) => binDir.replace(value, `$${key}`))
+                          .join(' / ')
+                        + ` ( ${binDir} )`
+                      : binDir
+                  ),
                   inspect(await fs.readdir(binDir).catch(error => error)),
                   '```',
                   '',
@@ -224,10 +246,6 @@ jobs:
             }
 
             env.POSTINSTALL_TYPE = 'Global Dependencies';
-            env.DEBUG_DATA_JSON_PATH = path.join(
-              await fs.mkdtemp(os.tmpdir() + path.sep),
-              'debug-data.json',
-            );
             if (pmType === 'npm') {
               await exec.exec('npm install --global', [tarballPath], { env });
             } else if (pmType === 'yarn') {

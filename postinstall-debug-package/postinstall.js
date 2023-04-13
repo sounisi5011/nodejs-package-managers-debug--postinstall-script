@@ -185,7 +185,10 @@ async function crossExec(command, args) {
         '',
       ].join('\n'),
     );
-  if (DEBUG_DATA_JSON_PATH)
+  if (
+    DEBUG_DATA_JSON_PATH &&
+    !process.argv.includes('--no-write-debug-data-json')
+  )
     await writeFile(
       DEBUG_DATA_JSON_PATH,
       JSON.stringify({
