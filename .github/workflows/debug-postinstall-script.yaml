@@ -136,10 +136,43 @@ jobs:
 
       - name: Run install
         uses: actions/github-script@v6
+        env:
+          RUNNER_TEMP_DIR: ${{ runner.temp }}
+          TARBALL_PATH: ./${{ needs.setup.outputs.tarball-name }}
         with:
           script: |
+            const fs = require('fs/promises');
             const os = require('os');
             const path = require('path');
+
+            const tarballFullpath = await core.group('Move debugger package tarball', async () => {
+              const rootDir = path.resolve(process.cwd(), '/');
+              const dirList = [rootDir, os.homedir(), process.env.RUNNER_TEMP_DIR];
+              const tarballPathList = dirList
+                .map(dir => path.resolve(dir, 'debugger-package.tgz'))
+                // Exclude paths that belong to different drive letters
+                .filter(filepath => filepath.startsWith(rootDir))
+                // Sort by shortest filepath
+                .sort((a, b) => a.length - b.length);
+              const origTarballPath = path.resolve(process.env.TARBALL_PATH);
+              console.log({
+                origTarballPath,
+                tarballPathList,
+              });
+
+              for (const tarballPath of tarballPathList) {
+                try {
+                  await fs.rename(origTarballPath, tarballPath);
+                  console.log({ tarballPath });
+                  return tarballPath;
+                } catch (error) {
+                  console.log(error);
+                }
+              }
+
+              console.log({ tarballPath: origTarballPath });
+              return origTarballPath;
+            });
 
             const packageManager = '${{ matrix.package-manager }}';
             const pmType = packageManager.replace(/@.+$/s, '');
@@ -155,7 +188,7 @@ jobs:
               });
             }
 
-            const tarballPath = './${{ needs.setup.outputs.tarball-name }}';
+            const tarballPath = path.relative(process.cwd(), tarballFullpath);
             let env = {
               ...process.env,
               POSTINSTALL_TYPE: 'Local Dependencies',
@@ -163,7 +196,11 @@ jobs:
             if (pmType === 'npm') {
               await exec.exec('npm install', [tarballPath], { env });
             } else if (pmType === 'yarn') {
-              await exec.exec('yarn add', [tarballPath], { env });
+              if (packageManager.startsWith('yarn@1.')) {
+                await exec.exec('yarn add', [tarballPath], { env });
+              } else {
+                await exec.exec('yarn add', [tarballPath.replaceAll(path.sep, '/')], { env });
+              }
             } else if (pmType === 'pnpm') {
               await exec.exec('pnpm add', [tarballPath], { env });
             } else if (pmType === 'bun') {
