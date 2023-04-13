@@ -117,11 +117,6 @@ jobs:
               // On Windows, if a string starting with a slash is passed as an argument, the slash is replaced with "C:/Program Files/Git/".
               // To avoid this, add a dummy character "X" at the beginning of each argument and remove it here.
               const args = process.argv.slice(1).map(arg => arg.substring(1));
-              /// DEBUG ///
-              console.warn({
-                args,
-              });
-              /// DEBUG ///
 
               // To convert a path like "/root-name" to an absolute path with a Windows drive letter,
               // it is necessary to pass "process.cwd()" as the first argument to the "path.resolve()" function.
