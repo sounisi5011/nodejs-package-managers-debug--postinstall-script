@@ -113,21 +113,21 @@ jobs:
 
           exec_with_debug tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
-          temp_dir='${{ runner.temp }}'
-          tarball_name="$(basename '${{ env.tarball-path }}')"
-          tarball_path="$(node -p '
-            const path = require("path")
-            const targetPath = path.resolve(process.argv[process.argv.length - 1]);
-            let rootDir = targetPath;
+          orig_tarball_path="$(realpath './${{ needs.setup.outputs.tarball-name }}')"
+          root_dir="$(node -p '
+            const path = require("path");
+            let rootDir = process.cwd();
             while (rootDir !== (rootDir = path.dirname(rootDir)));
-            path.resolve(rootDir, path.basename(targetPath))
-          ' "./${tarball_name}")"
-          if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"; then
-            tarball_path="${temp_dir}/${tarball_name}"
-            if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"; then
-              tarball_path="$HOME/${tarball_name}"
-              exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"
+            rootDir
+          ')"
+          tarball_name="$(basename '${{ env.tarball-path }}')"
+          for tarball_path in "${root_dir}/${tarball_name}" '${{ runner.temp }}'"/${tarball_name}" "$HOME/${tarball_name}"; do
+            if exec_with_debug mv "${orig_tarball_path}" "${tarball_path}"; then
+              break
             fi
+          done
+          if [[ ! -f "${tarball_path}" ]]; then
+            tarball_path="${orig_tarball_path}"
           fi
           echo "tarball-path=${tarball_path}" >> "${GITHUB_ENV}"
 
