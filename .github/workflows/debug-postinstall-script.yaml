@@ -122,10 +122,6 @@ jobs:
             while (rootDir !== (rootDir = path.dirname(rootDir)));
             path.resolve(rootDir, path.basename(targetPath))
           ' "./${tarball_name}")"
-          if [[ '${{ runner.os }}' == 'Windows' ]]; then
-            tarball_path="$(cygpath --unix "${tarball_path}")"
-            temp_dir="$(cygpath --unix "${temp_dir}")"
-          fi
           ##### DEBUG #####
           echo "tarball_path: '${tarball_path}'"
           echo "temp_dir: '${temp_dir}'"
@@ -137,9 +133,6 @@ jobs:
               tarball_path="$HOME/${tarball_name}"
               exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"
             fi
-          fi
-          if [[ '${{ runner.os }}' == 'Windows' ]]; then
-            tarball_path="$(cygpath --windows "${tarball_path}")"
           fi
           echo "tarball-path=${tarball_path}" >> "${GITHUB_ENV}"
 
