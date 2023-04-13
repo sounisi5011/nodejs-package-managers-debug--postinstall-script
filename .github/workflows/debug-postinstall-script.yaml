@@ -110,18 +110,26 @@ jobs:
             echo "[command]$*" >&2
             "$@"
           }
+          resolve_path() {
+            node -p '
+              const { readFileSync } = require("fs");
+              const path = require("path");
+
+              // On Windows, if a string starting with a slash is passed as an argument, the slash is replaced with "C:/Program Files/Git/".
+              // To avoid this, tarball_path is passed from stdin.
+              const stdin = readFileSync(0, "utf8");
+
+              // To convert a path like "/root-name" to an absolute path with a Windows drive letter,
+              // it is necessary to pass "process.cwd()" as the first argument to the "path.resolve()" function.
+              path.resolve(process.cwd(), stdin.trim())
+            '
+          }
 
           exec_with_debug tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
-          orig_tarball_path="$(realpath './${{ needs.setup.outputs.tarball-name }}'${{
-            runner.os == 'Windows' && ' | cygpath --windows --file -' || ''
-          }})"
+          orig_tarball_path="$(echo './${{ needs.setup.outputs.tarball-name }}' | resolve_path)"
           for tarball_path in '${{ env.tarball-path }}' ${{ runner.os == 'Windows' && format('''{0}''', runner.temp) || '~' }}/"$(basename '${{ env.tarball-path }}')"; do
-            # To convert a path like "/root-name" to an absolute path with a Windows drive letter,
-            # it is necessary to pass "process.cwd()" as the first argument to the "path.resolve()" function.
-            # Note: On Windows, if a string starting with a slash is passed as an argument, the slash is replaced with "C:/Program Files/Git/".
-            #       To avoid this, tarball_path is passed from stdin.
-            tarball_path="$(echo "${tarball_path}" | node -p 'const stdin=require("fs").readFileSync(0, "utf8"); require("path").resolve(process.cwd(), stdin.trim())')"
+            tarball_path="$(echo "${tarball_path}" | resolve_path)"
             if exec_with_debug mv "${orig_tarball_path}" "${tarball_path}"; then
               break
             fi
