@@ -124,7 +124,7 @@ jobs:
             rootDir
           ')"
           tarball_name="$(basename '${{ env.tarball-path }}')"
-          for tarball_path in "${root_dir}/${tarball_name}" ${{ runner.os == 'Windows' && format('''{0}''"/${tarball_name}"', runner.temp) || '"$HOME/${tarball_name}"' }}; do
+          for tarball_path in "${root_dir}/${tarball_name}" ${{ runner.os == 'Windows' && format('''{0}''{1}', runner.temp, '"/${tarball_name}"') || '"$HOME/${tarball_name}"' }}; do
             if [[ '${{ runner.os }}' == 'Windows' ]]; then
               tarball_path="$(cygpath --windows "${tarball_path}")"
             fi
