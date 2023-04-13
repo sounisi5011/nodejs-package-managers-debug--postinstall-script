@@ -283,7 +283,7 @@ jobs:
                     [binDir]
                       .concat(
                         prefixEnvEntries
-                          .map(([key, value]) => binDir.replace(value, `$${key}`))
+                          .map(([key, value]) => binDir.replace(value, `\${${key}}`))
                       )
                       .join('\n'),
                     '// ',
@@ -384,7 +384,7 @@ jobs:
                     '```js',
                     indentStr([
                       binDir,
-                      binDir.replace(npm_config_prefix, '$npm_config_prefix'),
+                      binDir.replace(npm_config_prefix, '${npm_config_prefix}'),
                     ].join('\n'), '// ', '// Files in '),
                     await inspectInstalledBin(binDir),
                     '```',
