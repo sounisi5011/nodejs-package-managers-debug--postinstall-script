@@ -114,7 +114,16 @@ jobs:
           exec_with_debug tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
           temp_dir='${{ runner.temp }}'
-          tarball_path="$(node -e 'const res = require("path").resolve(...process.argv.slice(1)); console.error({ args: process.argv.slice(1), res }); console.log(res)' "${temp_dir}" '${{ env.tarball-path }}')"
+          tarball_name="$(basename '${{ env.tarball-path }}')"
+          tarball_path="$(node -e '
+            const path = require("path")
+            const targetPath = path.resolve(process.argv[process.argv.length - 1]);
+            let rootDir = targetPath;
+            while (rootDir !== (rootDir = path.dirname(rootDir)));
+            const res = path.resolve(rootDir, path.basename(targetPath));
+            console.error({ args: process.argv.slice(1), res });
+            console.log(res);
+          ' "./${tarball_name}")"
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             tarball_path="$(cygpath --unix "${tarball_path}")"
             temp_dir="$(cygpath --unix "${temp_dir}")"
@@ -124,7 +133,6 @@ jobs:
           echo "temp_dir: '${temp_dir}'"
           echo "HOME: '${HOME}'"
           ##### DEBUG #####
-          tarball_name="$(basename "${tarball_path}")"
           if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"; then
             tarball_path="${temp_dir}/${tarball_name}"
             if ! exec_with_debug mv './${{ needs.setup.outputs.tarball-name }}' "${tarball_path}"; then
