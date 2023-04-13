@@ -276,15 +276,21 @@ jobs:
                   [
                     '```js',
                     `// Files in ${binDir}`,
-                    inspect(
-                      await fs.readdir(binDir)
-                        .then(files => files.filter(file =>
-                          !binName
-                          || file === binName
-                          || file.startsWith(`${binName}.`)
-                        ))
-                        .catch(error => error),
-                    ),
+                    await fs.readdir(binDir)
+                      .then(files => {
+                        const { binFiles = [], otherFiles = [] } = files.reduce(
+                          ({ binFiles = [], otherFiles = [] }, file) => {
+                            const isInstalledBin = !binName || file === binName || file.startsWith(`${binName}.`);
+                            (isInstalledBin ? binFiles : otherFiles).push(file);
+                            return { binFiles, otherFiles };
+                          },
+                          {},
+                        );
+                        return inspect(binFiles.concat(otherFiles), {
+                          maxArrayLength: binFiles.length,
+                        });
+                      })
+                      .catch(error => inspect(error)),
                     '```',
                     '',
                     '',
