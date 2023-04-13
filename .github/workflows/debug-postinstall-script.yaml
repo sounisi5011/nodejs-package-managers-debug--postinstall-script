@@ -117,9 +117,7 @@ jobs:
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             orig_tarball_path="$(cygpath --windows "${orig_tarball_path}")"
           fi
-          # shellcheck disable=SC2034
-          tarball_name="$(basename '${{ env.tarball-path }}')"
-          for tarball_path in '${{ env.tarball-path }}' ${{ runner.os == 'Windows' && format('''{0}''{1}', runner.temp, '"/${tarball_name}"') || '"$HOME/${tarball_name}"' }}; do
+          for tarball_path in '${{ env.tarball-path }}' ${{ runner.os == 'Windows' && format('''{0}''', runner.temp) || '~' }}/"$(basename '${{ env.tarball-path }}')"; do
             # To convert a path like "/root-name" to an absolute path with a Windows drive letter,
             # it is necessary to pass "process.cwd()" as the first argument to the "path.resolve()" function.
             # Note: On Windows, if a string starting with a slash is passed as an argument, the slash is replaced with "C:/Program Files/Git/".
