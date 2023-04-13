@@ -166,7 +166,7 @@ jobs:
                   console.log({ tarballPath });
                   return tarballPath;
                 } catch (error) {
-                  console.error(error);
+                  console.log(error);
                 }
               }
 
