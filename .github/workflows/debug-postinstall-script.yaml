@@ -114,6 +114,9 @@ jobs:
           exec_with_debug tar -x --file ~/debug-package-artifact/'${{ needs.setup.outputs.archive-filename }}' --zstd --verbose
 
           orig_tarball_path="$(realpath './${{ needs.setup.outputs.tarball-name }}')"
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            orig_tarball_path="$(cygpath --windows "${orig_tarball_path}")"
+          fi
           root_dir="$(node -p '
             const path = require("path");
             let rootDir = process.cwd();
@@ -122,6 +125,9 @@ jobs:
           ')"
           tarball_name="$(basename '${{ env.tarball-path }}')"
           for tarball_path in "${root_dir}/${tarball_name}" '${{ runner.temp }}'"/${tarball_name}" "$HOME/${tarball_name}"; do
+            if [[ '${{ runner.os }}' == 'Windows' ]]; then
+              tarball_path="$(cygpath --windows "${tarball_path}")"
+            fi
             if exec_with_debug mv "${orig_tarball_path}" "${tarball_path}"; then
               break
             fi
