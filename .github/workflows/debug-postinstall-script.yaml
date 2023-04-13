@@ -188,7 +188,7 @@ jobs:
               });
             }
 
-            const tarballPath = path.resolve(process.env.TARBALL_PATH);
+            const tarballPath = path.relative(process.cwd(), process.env.TARBALL_PATH);
             let env = {
               ...process.env,
               POSTINSTALL_TYPE: 'Local Dependencies',
@@ -213,7 +213,7 @@ jobs:
                 // Note: On Windows, the "yarn dlx --package" command does not know the local filepath
                 // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
                 if (process.platform !== 'win32') {
-                  await exec.exec('yarn dlx --package', [tarballPath, 'bar'], { env });
+                  await exec.exec('yarn dlx --package', [path.resolve(tarballPath), 'bar'], { env });
                 }
               }
             } else if (pmType === 'pnpm') {
@@ -226,7 +226,7 @@ jobs:
                   .map(([key, value]) => [key, [value, PNPM_HOME].join(path.delimiter)])
               );
 
-              await exec.exec('pnpm add --global', [tarballPath], {
+              await exec.exec('pnpm add --global', [path.resolve(tarballPath)], {
                 env: {
                   ...env,
                   ...pathEnv,
@@ -234,7 +234,7 @@ jobs:
                 },
               });
             } else if (pmType === 'bun') {
-              await exec.exec('bun add --global', [tarballPath], { env });
+              await exec.exec('bun add --global', [path.resolve(tarballPath)], { env });
             }
 
   # Successfully complete this job when all jobs have been completed.
