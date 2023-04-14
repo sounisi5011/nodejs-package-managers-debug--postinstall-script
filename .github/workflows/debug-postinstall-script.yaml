@@ -345,12 +345,12 @@ jobs:
               await exec.exec('npm install --global', [tarballPath], { env: installEnv });
             } else if (pmType === 'yarn') {
               if (packageManager.startsWith('yarn@1.')) {
-                await exec.exec('yarn global add', [tarballPath], { env: installEnv });
+                await exec.exec('yarn global add', [tarballFullpath], { env: installEnv });
               } else {
                 // Note: On Windows, the "yarn dlx --package" command does not know the local filepath
                 // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
                 if (process.platform !== 'win32') {
-                  await exec.exec('yarn dlx --package', [path.resolve(tarballPath), 'bar'], { env: installEnv });
+                  await exec.exec('yarn dlx --package', [tarballFullpath, 'bar'], { env: installEnv });
                 }
               }
             } else if (pmType === 'pnpm') {
@@ -363,7 +363,7 @@ jobs:
                   .map(([key, value]) => [key, [value, PNPM_HOME].join(path.delimiter)])
               );
 
-              await exec.exec('pnpm add --global', [path.resolve(tarballPath)], {
+              await exec.exec('pnpm add --global', [tarballFullpath], {
                 env: {
                   ...installEnv,
                   ...pathEnv,
@@ -371,7 +371,7 @@ jobs:
                 },
               });
             } else if (pmType === 'bun') {
-              await exec.exec('bun add --global', [path.resolve(tarballPath)], { env: installEnv });
+              await exec.exec('bun add --global', [tarballFullpath], { env: installEnv });
             }
             {
               const { GITHUB_STEP_SUMMARY } = defaultEnv;
