@@ -146,6 +146,17 @@ jobs:
             const path = require('path');
             const { inspect } = require('util');
 
+            function insertHeader(headerStr, lineList, linePrefix) {
+              if (lineList.length < 1) return [];
+              return [
+                headerStr,
+                ...lineList.map((...args) =>
+                  typeof linePrefix === 'function'
+                  ? linePrefix(...args)
+                  : (linePrefix ? String(linePrefix) + args[0] : args[0])
+                ),
+              ];
+            }
             /**
              * @see https://jsonlines.org/
              */
@@ -187,6 +198,29 @@ jobs:
                 /^(?!$)/gms,
                 (_, offset) => offset === 0 ? firstPrefixStr : prefixStr,
               );
+            }
+            function filepathUsingEnvNameList(filepath, env) {
+              return Object.entries(env ?? {})
+                .flatMap(([key, value]) => {
+                  if (!value || /^(?:[A-Z]:)?[/\\]$/i.test(value)) return [];
+
+                  if (filepath.startsWith(value)) {
+                    return {
+                      envName: key,
+                      path: `\${${key}}` + filepath.substring(value.length),
+                      rawPath: filepath,
+                    };
+                  }
+                  if (path.sep !== '/' && filepath.startsWith(value.replace('/', path.sep))) {
+                    return {
+                      envName: key,
+                      path: `\${${key}.replace('/', '${path.sep}')}` + filepath.substring(value.length),
+                      rawPath: filepath,
+                    };
+                  }
+
+                  return [];
+                })
             }
 
             const tarballFullpath = await core.group('Move debugger package tarball', async () => {
@@ -269,25 +303,15 @@ jobs:
                   ))
                   .catch(error => ({}))
               );
-              const prefixEnvEntries = Object.entries(debugData.env ?? {})
-                .filter(([, value]) => (
-                  value
-                  && !/^(?:[A-Z]:)?[/\\]$/i.test(value)
-                  && binDir.startsWith(value)
-                ));
               await fs.appendFile(
                 GITHUB_STEP_SUMMARY,
                 [
                   '```js',
-                  indentStr(
-                    [binDir]
-                      .concat(
-                        prefixEnvEntries
-                          .map(([key, value]) => binDir.replace(value, `\${${key}}`))
-                      )
-                      .join('\n'),
-                    '// ',
-                    '// Files in ',
+                  `// Files in ${binDir}`
+                  ...insertHeader(
+                    '// This path can also be got using environment variables:',
+                    filepathUsingEnvNameList(binDir, debugData.env ?? {}).map(({ path }) => path),
+                    '//     ',
                   ),
                   inspect(await fs.readdir(binDir).catch(error => error)),
                   '```',
@@ -361,31 +385,50 @@ jobs:
                   })
                   .catch(error => inspect(error));
               }
+
+              const prefixEnvName = 'npm_config_prefix';
               if (binDir) {
                 await fs.appendFile(
                   GITHUB_STEP_SUMMARY,
                   [
                     '```js',
                     `// Files in ${binDir}`,
+                    ...insertHeader(
+                      '// This path can also be got using environment variables:',
+                      filepathUsingEnvNameList(binDir, debugData.env ?? {}).map(({ path }) => path),
+                      '//     ',
+                    ),
                     await inspectInstalledBin(binDir),
                     '```',
                     '',
                     '',
                   ].join('\n'),
                 );
-              } else if (debugData.env?.npm_config_prefix) {
-                const { npm_config_prefix } = debugData.env;
+              } else if (debugData.env?.[prefixEnvName]) {
+                const prefix = debugData.env[prefixEnvName];
+                // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
                 const binDir = process.platform === 'win32'
-                  ? npm_config_prefix
-                  : path.join(npm_config_prefix, 'bin');
+                  ? prefix
+                  : path.join(prefix, 'bin');
+
+                const binDirUsingEnvNameList = filepathUsingEnvNameList(binDir, debugData.env ?? {});
                 await fs.appendFile(
                   GITHUB_STEP_SUMMARY,
                   [
                     '```js',
                     indentStr([
-                      binDir,
-                      binDir.replace(npm_config_prefix, '${npm_config_prefix}'),
+                      ...binDirUsingEnvNameList
+                          .filter(({ envName }) => envName === prefixEnvName)
+                          .map(({ path }) => path),
+                      `( ${binDir} )`,
                     ].join('\n'), '// ', '// Files in '),
+                    ...insertHeader(
+                      '// This path can also be got using other environment variables:',
+                      binDirUsingEnvNameList
+                        .filter(({ envName }) => envName !== prefixEnvName)
+                        .map(({ path }) => path),
+                      '//     ',
+                    ),
                     await inspectInstalledBin(binDir),
                     '```',
                     '',
