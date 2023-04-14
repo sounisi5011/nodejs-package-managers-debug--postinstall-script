@@ -234,7 +234,7 @@ async function getEnvAddedByPackageManager(env = process.env) {
     ...(binCommand?.args
       ? { [binCommand.args.join(' ')]: binCommandResult }
       : {}),
-    env: getEnvAddedByPackageManager(process.env),
+    env: await getEnvAddedByPackageManager(process.env),
   };
   if (postinstallType) console.log(postinstallType);
   console.log(debugData);
