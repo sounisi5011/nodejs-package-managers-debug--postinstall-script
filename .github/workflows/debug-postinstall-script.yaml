@@ -252,23 +252,28 @@ jobs:
               return origTarballPath;
             });
 
+            const defaultEnv = Object.fromEntries(
+              Object.entries(process.env)
+                .filter(([key]) => !/^(?:DISABLE_)?(?:npm_|yarn_|PNPM_|BUN_)|^(?:INIT_CWD|PROJECT_CWD)$/i.test(key))
+            );
+
             const packageManager = '${{ matrix.package-manager }}';
             const pmType = packageManager.replace(/@.+$/s, '');
             await core.group('Show node and package manager version', async () => {
-              await exec.exec('node --version');
-              await exec.exec(pmType, ['--version']);
+              await exec.exec('node --version', { env: defaultEnv });
+              await exec.exec(pmType, ['--version'], { env: defaultEnv });
             });
 
             if (pmType === 'yarn' && !packageManager.startsWith('yarn@1.')) {
               // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
               await core.group('Setup', async () => {
-                await exec.exec('yarn config set enableImmutableInstalls false');
+                await exec.exec('yarn config set enableImmutableInstalls false', { env: defaultEnv });
               });
             }
 
             const tarballPath = path.relative(process.cwd(), tarballFullpath);
             const installEnv = {
-              ...process.env,
+              ...defaultEnv,
               POSTINSTALL_TYPE: 'Local Dependencies',
               DEBUG_DATA_JSON_LINES_PATH: path.join(
                 await fs.mkdtemp(os.tmpdir() + path.sep),
@@ -289,7 +294,7 @@ jobs:
               await exec.exec('bun add', [tarballPath], { env: installEnv });
             }
             {
-              const { GITHUB_STEP_SUMMARY } = process.env;
+              const { GITHUB_STEP_SUMMARY } = defaultEnv;
               const binDir = path.resolve(process.cwd(), 'node_modules/.bin');
               const debugData = (
                 await fs.readFile(installEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
@@ -355,7 +360,7 @@ jobs:
               await exec.exec('bun add --global', [path.resolve(tarballPath)], { env: installEnv });
             }
             {
-              const { GITHUB_STEP_SUMMARY } = process.env;
+              const { GITHUB_STEP_SUMMARY } = defaultEnv;
               const { binDir, binName, ...debugData } = (
                 await fs.readFile(installEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
                   .then(parseJsonLines)
