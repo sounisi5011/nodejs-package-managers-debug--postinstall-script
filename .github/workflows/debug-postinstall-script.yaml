@@ -388,6 +388,13 @@ jobs:
 
               const prefixEnvName = 'npm_config_prefix';
               if (binDir) {
+                ///// DEBUG /////
+                core.notice(inspect(Object.fromEntries(
+                  Object.entries(process.env).filter(([key]) =>
+                    /^(?:npm|yarn|pnpm|bun)_/i.test(key),
+                  ),
+                )));
+                ///// DEBUG /////
                 await fs.appendFile(
                   GITHUB_STEP_SUMMARY,
                   [
