@@ -296,7 +296,6 @@ jobs:
               });
             }
 
-            const tarballPath = path.relative(process.cwd(), tarballFullpath);
             const installEnv = {
               ...defaultEnv,
               POSTINSTALL_TYPE: 'Local Dependencies',
@@ -306,7 +305,7 @@ jobs:
               ),
             };
             if (pmType === 'npm') {
-              await exec.exec('npm install', [tarballPath], { env: installEnv });
+              await exec.exec('npm install', [tarballFullpath], { env: installEnv });
             } else if (pmType === 'yarn') {
               if (packageManager.startsWith('yarn@1.')) {
                 await exec.exec('yarn add', [tarballFullpath], { env: installEnv });
@@ -353,7 +352,7 @@ jobs:
 
             installEnv.POSTINSTALL_TYPE = 'Global Dependencies';
             if (pmType === 'npm') {
-              await exec.exec('npm install --global', [tarballPath], { env: installEnv });
+              await exec.exec('npm install --global', [tarballFullpath], { env: installEnv });
             } else if (pmType === 'yarn') {
               if (packageManager.startsWith('yarn@1.')) {
                 await exec.exec('yarn global add', [tarballFullpath], { env: installEnv });
