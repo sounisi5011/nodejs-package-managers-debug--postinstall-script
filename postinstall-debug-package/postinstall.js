@@ -223,7 +223,7 @@ async function execPackageManagerCommand(commandAndArgs) {
     await appendFile(
       GITHUB_STEP_SUMMARY,
       [
-        `<details${Object.keys(debugData.env).length < 30 ? ' open' : ''}>`,
+        `<details>`,
         ...(postinstallType ? [`<summary>${postinstallType}</summary>`] : []),
         '',
         '```js',
