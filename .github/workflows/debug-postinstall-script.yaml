@@ -270,9 +270,12 @@ jobs:
               return origTarballPath;
             });
 
-            const newCWD = path.resolve('${{ needs.setup.outputs.workspace-dirname }}', 'sub-dir/hoge');
-            await fs.mkdir(newCWD, { recursive: true });
-            process.chdir(newCWD);
+            const workspaceRootpath = path.resolve('${{ needs.setup.outputs.workspace-dirname }}');
+            {
+              const newCWD = path.resolve(workspaceRootpath, 'sub-dir/hoge');
+              await fs.mkdir(newCWD, { recursive: true });
+              process.chdir(newCWD);
+            }
 
             const defaultEnv = Object.fromEntries(
               Object.entries(process.env)
@@ -317,7 +320,7 @@ jobs:
             }
             {
               const { GITHUB_STEP_SUMMARY } = defaultEnv;
-              const binDir = path.resolve(process.cwd(), 'node_modules/.bin');
+              const binDir = path.resolve(workspaceRootpath, 'node_modules/.bin');
               const debugData = (
                 await fs.readFile(installEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
                   .then(parseJsonLines)
