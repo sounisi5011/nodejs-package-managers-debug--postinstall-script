@@ -45,6 +45,7 @@ jobs:
           {
             echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project"'
           } > ./'${{ env.workspace-dirname }}'/package.json
+          touch ./'${{ env.workspace-dirname }}'/yarn.lock
           echo '{}' > ./package.json
 
           find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
