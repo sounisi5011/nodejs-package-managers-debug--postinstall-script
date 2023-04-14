@@ -298,14 +298,14 @@ jobs:
               await exec.exec('npm install', [tarballPath], { env: installEnv });
             } else if (pmType === 'yarn') {
               if (packageManager.startsWith('yarn@1.')) {
-                await exec.exec('yarn add', [tarballPath], { env: installEnv });
+                await exec.exec('yarn add', [tarballFullpath], { env: installEnv });
               } else {
-                await exec.exec('yarn add', [tarballPath.replaceAll(path.sep, '/')], { env: installEnv });
+                await exec.exec('yarn add', [tarballFullpath.replaceAll(path.sep, '/')], { env: installEnv });
               }
             } else if (pmType === 'pnpm') {
-              await exec.exec('pnpm add', [tarballPath], { env: installEnv });
+              await exec.exec('pnpm add', [tarballFullpath], { env: installEnv });
             } else if (pmType === 'bun') {
-              await exec.exec('bun add', [tarballPath], { env: installEnv });
+              await exec.exec('bun add', [tarballFullpath], { env: installEnv });
             }
             {
               const { GITHUB_STEP_SUMMARY } = defaultEnv;
