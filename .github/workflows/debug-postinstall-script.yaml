@@ -300,7 +300,7 @@ jobs:
               if (packageManager.startsWith('yarn@1.')) {
                 await exec.exec('yarn add', [tarballFullpath], { env: installEnv });
               } else {
-                await exec.exec('yarn add', ['file:' + tarballFullpath.replaceAll(path.sep, '/')], { env: installEnv });
+                await exec.exec('yarn add', [tarballFullpath.replaceAll(path.sep, '/')], { env: installEnv });
               }
             } else if (pmType === 'pnpm') {
               await exec.exec('pnpm add', [tarballFullpath], { env: installEnv });
