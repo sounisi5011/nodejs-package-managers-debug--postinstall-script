@@ -199,10 +199,10 @@ jobs:
                 (_, offset) => offset === 0 ? firstPrefixStr : prefixStr,
               );
             }
-            function filepathUsingEnvNameList(filepath, env, excludeEnv = {}) {
+            function filepathUsingEnvNameList(filepath, env) {
               return Object.entries(env ?? {})
                 .flatMap(([key, value]) => {
-                  if (!value || /^(?:[A-Z]:)?[/\\]?$/i.test(value) || excludeEnv[key] === value) return [];
+                  if (!value || /^(?:[A-Z]:)?[/\\]?$/i.test(value)) return [];
 
                   if (filepath.startsWith(value)) {
                     return {
@@ -310,7 +310,7 @@ jobs:
                   `// Files in ${binDir}`,
                   ...insertHeader(
                     '// This path can also be got using environment variables:',
-                    filepathUsingEnvNameList(binDir, debugData.env, process.env).map(({ path }) => path),
+                    filepathUsingEnvNameList(binDir, debugData.env ?? {}).map(({ path }) => path),
                     '//     ',
                   ),
                   inspect(await fs.readdir(binDir).catch(error => error)),
@@ -402,7 +402,7 @@ jobs:
                     `// Files in ${binDir}`,
                     ...insertHeader(
                       '// This path can also be got using environment variables:',
-                      filepathUsingEnvNameList(binDir, debugData.env, process.env).map(({ path }) => path),
+                      filepathUsingEnvNameList(binDir, debugData.env ?? {}).map(({ path }) => path),
                       '//     ',
                     ),
                     await inspectInstalledBin(binDir),
@@ -418,7 +418,7 @@ jobs:
                   ? prefix
                   : path.join(prefix, 'bin');
 
-                const binDirUsingEnvNameList = filepathUsingEnvNameList(binDir, debugData.env, process.env);
+                const binDirUsingEnvNameList = filepathUsingEnvNameList(binDir, debugData.env ?? {});
                 await fs.appendFile(
                   GITHUB_STEP_SUMMARY,
                   [
