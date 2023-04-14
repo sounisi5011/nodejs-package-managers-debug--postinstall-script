@@ -34,21 +34,26 @@ jobs:
         shell: bash
         run: |
           readonly root_path="$PWD"
+          readonly debugger_package_path="${root_path}"'/${{ env.repo-dirname }}/postinstall-debug-package'
+          readonly workspace_path="${root_path}"'/${{ env.workspace-dirname }}'
+
           (
-            cd './${{ env.repo-dirname }}/postinstall-debug-package/' && {
-              cp ./postinstall.js "${root_path}"/'${{ env.workspace-dirname }}'/
+            cd "${debugger_package_path}" && {
               npm pack
               mv ./*.tgz "${root_path}/${{ env.tarball-name }}"
             }
           )
-          mkdir -p ./'${{ env.workspace-dirname }}'
+
+          mkdir -p "${workspace_path}"
           {
             echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project"'
-          } > ./'${{ env.workspace-dirname }}'/package.json
-          touch ./'${{ env.workspace-dirname }}'/yarn.lock
-          echo '{}' > ./package.json
+          } > "${workspace_path}/package.json"
+          touch "${workspace_path}/yarn.lock"
+          cp "${debugger_package_path}/postinstall.js" "${workspace_path}"
 
-          find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
+          echo '{}' > "${root_path}/package.json"
+
+          find "${root_path}" -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
             | xargs -0 tar -c --file './${{ env.archive-filename }}' --zstd --verbose
         # Note: Convert the debug package into a single archive file. This is for the following reasons:
         #       + Maintaining file permissions and case sensitive files
