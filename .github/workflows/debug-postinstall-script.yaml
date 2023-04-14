@@ -53,7 +53,7 @@ jobs:
 
           echo '{}' > "${root_path}/package.json"
 
-          find "${root_path}" -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
+          find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
             | xargs -0 tar -c --file './${{ env.archive-filename }}' --zstd --verbose
         # Note: Convert the debug package into a single archive file. This is for the following reasons:
         #       + Maintaining file permissions and case sensitive files
