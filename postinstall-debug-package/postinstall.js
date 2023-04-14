@@ -90,32 +90,68 @@ const postinstallType =
     .findLast(Boolean) ?? process.env.POSTINSTALL_TYPE;
 
 /**
- * @param {string} commandName
- * @returns {string[]}
+ * @param {string[]} commandAndArgs
+ * @returns {Promise<{
+ *   stdout: string,
+ *   stderr: string,
+ *   commandAndArgs: string[],
+ *   actualCommandAndArgs: string[],
+ * }>}
  */
-function packageManagerCommand(commandName) {
-  const execpathIsJS =
-    process.env.npm_execpath &&
-    /\.[cm]?js$/.test(path.extname(process.env.npm_execpath));
-  return execpathIsJS
-    ? // Sometimes there are multiple versions of a package manager on a user's system, such as when using Corepack.
-      // In this case, the exec function may call another package manager that is in a different path than the running package manager.
-      // To avoid this, use the environment variable "npm_execpath".
-      [process.execPath, process.env.npm_execpath]
-    : [commandName];
-}
+async function crossExec(commandAndArgs) {
+  const command = commandAndArgs[0];
+  const args = commandAndArgs.slice(1);
 
-/**
- * @param {string} command
- * @param {string[]} args
- */
-async function crossExec(command, args) {
-  if (process.platform !== 'win32' || path.isAbsolute(command)) {
-    return await execFileAsync(command, args);
+  // Sometimes there are multiple versions of a package manager on a user's system, such as when using Corepack.
+  // In this case, the "child_process.execFile()" and "child_process.exec()" functions may call another package manager that is in a different path than the running package manager.
+  // To avoid this, use the environment variable "npm_execpath".
+  //
+  // Note: On Windows, the "child_process.exec()" function cannot execute absolute path commands.
+  //       We need to use the "child_process.execFile()" function instead.
+  //       Therefore, the "child_process.execFile()" function is used here even on Windows.
+  if (process.env.npm_execpath) {
+    const execpathIsJS = /\.[cm]?js$/.test(
+      path.extname(process.env.npm_execpath),
+    );
+    const actualCommandAndArgs = execpathIsJS
+      ? [process.execPath, process.env.npm_execpath, ...args]
+      : [process.env.npm_execpath, ...args];
+    const additionalProperties = { commandAndArgs, actualCommandAndArgs };
+
+    try {
+      return Object.assign(
+        await execFileAsync(
+          actualCommandAndArgs[0],
+          actualCommandAndArgs.slice(1),
+        ),
+        additionalProperties,
+      );
+    } catch (error) {
+      throw Object.assign(error, additionalProperties);
+    }
   }
-  // Note: This is bad code because it does not quote each argument.
-  //       However, this is not a problem because the arguments of the commands executed within this script do not need to be quoted.
-  return await execAsync([command, ...args].join(' '));
+
+  const additionalProperties = {
+    commandAndArgs,
+    actualCommandAndArgs: commandAndArgs,
+  };
+  try {
+    return Object.assign(
+      process.platform === 'win32'
+        ? // On Windows, the "child_process.execFile()" function cannot execute commands that are not absolute paths.
+          // We need to use the "child_process.exec()" function instead.
+          //
+          // Note: This is bad code because it does not quote each argument.
+          //       However, this is not a problem because the arguments of the commands executed within this script do not need to be quoted.
+          await execAsync(commandAndArgs.join(' '))
+        : // The "child_process.execFile()" function is more efficient than the "child_process.exec()" function and does not require escaping arguments.
+          // Therefore, it is used on non-Windows platforms.
+          await execFileAsync(command, args),
+      additionalProperties,
+    );
+  } catch (error) {
+    throw Object.assign(error, additionalProperties);
+  }
 }
 
 (async () => {
@@ -125,21 +161,20 @@ async function crossExec(command, args) {
     .catch(() => undefined);
   const binName = Object.keys(pkg?.bin ?? {})[0];
 
-  const binCommand = isYarn1
-    ? packageManagerCommand('yarn').concat(isGlobalMode ? 'global' : [], 'bin')
-    : (process.env.npm_config_user_agent || '')?.startsWith('pnpm/')
-    ? packageManagerCommand('pnpm').concat(
-        'bin',
-        isGlobalMode ? '--global' : [],
-      )
-    : packageManagerCommand('npm').concat(
-        'bin',
-        isGlobalMode ? '--global' : [],
-      );
   const binCommandResult = await crossExec(
-    binCommand[0],
-    binCommand.slice(1),
+    isYarn1
+      ? isGlobalMode
+        ? ['yarn', 'global', 'bin']
+        : ['yarn', 'bin']
+      : (process.env.npm_config_user_agent || '')?.startsWith('pnpm/')
+      ? ['pnpm', 'bin'].concat(isGlobalMode ? '--global' : [])
+      : ['npm', 'bin'].concat(isGlobalMode ? '--global' : []),
   ).catch((error) => ({ error }));
+  /** @type {string[]} */
+  const binCommandArgs =
+    'error' in binCommandResult
+      ? binCommandResult.error.commandAndArgs
+      : binCommandResult.commandAndArgs;
   const binDir =
     'stdout' in binCommandResult ? binCommandResult.stdout.trim() : null;
   const binFilepathList = binName
@@ -158,7 +193,7 @@ async function crossExec(command, args) {
     cwd,
     isGlobalMode,
     realBin: binFilepathList,
-    [binCommand.join(' ')]: binCommandResult,
+    [binCommandArgs.join(' ')]: binCommandResult,
     env: Object.fromEntries(
       Object.entries(process.env).filter(([key]) =>
         /^(?:npm|yarn|pnpm|bun)_/i.test(key),
@@ -194,7 +229,10 @@ async function crossExec(command, args) {
     const jsonStr = JSON.stringify({
       postinstallType: postinstallType ?? null,
       cwd,
-      binDir,
+      binCommand: {
+        args: binCommandArgs,
+        result: binDir,
+      },
       isGlobalMode,
       binName: binName ?? null,
       env: Object.fromEntries(

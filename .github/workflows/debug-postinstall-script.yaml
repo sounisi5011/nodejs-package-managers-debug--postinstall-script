@@ -369,7 +369,7 @@ jobs:
                     throw error;
                   })
               );
-              const { binDir, binName, ...debugData } = (
+              const { binCommand, binName, ...debugData } = (
                 debugDataList
                   .find(({ postinstallType }) => postinstallType === installEnv.POSTINSTALL_TYPE)
                 ?? {}
@@ -396,18 +396,21 @@ jobs:
               }
 
               const prefixEnvName = 'npm_config_prefix';
-              if (binDir) {
+              if (binCommand?.result) {
                 await fs.appendFile(
                   GITHUB_STEP_SUMMARY,
                   [
                     '```js',
-                    `// Files in ${binDir}`,
+                    indentStr([
+                      `$(${binCommand.args.join(' ')})`,
+                      `( ${binCommand.result} )`,
+                    ].join('\n'), '// ', '// Files in '),
                     ...insertHeader(
                       '// This path can also be got using environment variables:',
-                      filepathUsingEnvNameList(binDir, debugData.env, installEnv).map(({ path }) => path),
+                      filepathUsingEnvNameList(binCommand.result, debugData.env, installEnv).map(({ path }) => path),
                       '//     ',
                     ),
-                    await inspectInstalledBin(binDir),
+                    await inspectInstalledBin(binCommand.result),
                     '```',
                     '',
                     '',
