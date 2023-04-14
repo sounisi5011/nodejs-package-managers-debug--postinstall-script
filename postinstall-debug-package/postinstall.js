@@ -155,6 +155,73 @@ async function execPackageManagerCommand(commandAndArgs) {
   }
 }
 
+/**
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {Promise<NodeJS.ProcessEnv>}
+ */
+async function getEnvAddedByPackageManager(env = process.env) {
+  const specialenvName = 'DEBUG_ORIGINAL_ENV_JSON_PATH';
+  /** @type {Record<string, unknown> | null} */
+  const origEnv = env[specialenvName]
+    ? await readFile(env[specialenvName], 'utf8').then(JSON.parse)
+    : null;
+
+  const envEntries = Object.entries(env);
+  if (!origEnv) {
+    return Object.fromEntries(
+      envEntries.filter(([key]) =>
+        /^(?:DISABLE_)?(?:npm|yarn|PNPM|BUN)_|^(?:INIT_CWD|PROJECT_CWD)$/i.test(
+          key,
+        ),
+      ),
+    );
+  }
+
+  return Object.fromEntries(
+    envEntries
+      .filter(
+        ([key, value]) =>
+          key === specialenvName || (origEnv[key] ?? undefined) !== value,
+      )
+      .map(([key, value]) => {
+        const origValue = origEnv[key];
+        if (
+          /^PATH$/i.test(key) &&
+          typeof value === 'string' &&
+          typeof origValue === 'string'
+        ) {
+          return [
+            key,
+            // Omit duplicate $PATH values
+            Object.assign(value, {
+              /**
+               * @this {String}
+               * @param {number} _depth
+               * @param {import('util').InspectOptions} options
+               * @returns {string}
+               */
+              [inspect.custom](_depth, options) {
+                const value = this.valueOf();
+                return inspect(
+                  value,
+                  typeof value === 'string' &&
+                    origValue.length < value.length &&
+                    value.endsWith(origValue)
+                    ? {
+                        ...options,
+                        maxStringLength: value.length - origValue.length,
+                      }
+                    : options,
+                );
+              },
+            }),
+          ];
+        }
+        return [key, value];
+      }),
+  );
+}
+
 (async () => {
   const cwd = process.cwd();
   const pkg = await readFile(path.resolve(__dirname, 'package.json'), 'utf8')
@@ -205,11 +272,7 @@ async function execPackageManagerCommand(commandAndArgs) {
     ...(binCommand?.args
       ? { [binCommand.args.join(' ')]: binCommandResult }
       : {}),
-    env: Object.fromEntries(
-      Object.entries(process.env).filter(([key]) =>
-        /^(?:npm|yarn|pnpm|bun)_/i.test(key),
-      ),
-    ),
+    env: await getEnvAddedByPackageManager(process.env),
   };
   if (postinstallType) console.log(postinstallType);
   console.log(debugData);
