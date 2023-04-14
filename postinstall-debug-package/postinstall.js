@@ -155,6 +155,35 @@ async function execPackageManagerCommand(commandAndArgs) {
   }
 }
 
+/**
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {Promise<NodeJS.ProcessEnv>}
+ */
+async function getEnvAddedByPackageManager(env = process.env) {
+  const specialenvName = 'DEBUG_ORIGINAL_ENV_JSON_PATH';
+  const origEnv = env[specialenvName]
+    ? await readFile(env[specialenvName], 'utf8').then(JSON.parse)
+    : null;
+
+  const envEntries = Object.entries(env);
+  if (!origEnv) {
+    return Object.fromEntries(
+      envEntries.filter(([key]) =>
+        /^(?:DISABLE_)?(?:npm|yarn|PNPM|BUN)_|^(?:INIT_CWD|PROJECT_CWD)$/i.test(
+          key,
+        ),
+      ),
+    );
+  }
+
+  return Object.fromEntries(
+    envEntries.filter(
+      ([key, value]) =>
+        key === specialenvName || (origEnv[key] ?? undefined) !== value,
+    ),
+  );
+}
+
 (async () => {
   const cwd = process.cwd();
   const pkg = await readFile(path.resolve(__dirname, 'package.json'), 'utf8')
@@ -205,11 +234,7 @@ async function execPackageManagerCommand(commandAndArgs) {
     ...(binCommand?.args
       ? { [binCommand.args.join(' ')]: binCommandResult }
       : {}),
-    env: Object.fromEntries(
-      Object.entries(process.env).filter(([key]) =>
-        /^(?:npm|yarn|pnpm|bun)_/i.test(key),
-      ),
-    ),
+    env: getEnvAddedByPackageManager(process.env),
   };
   if (postinstallType) console.log(postinstallType);
   console.log(debugData);
