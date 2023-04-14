@@ -361,24 +361,28 @@ jobs:
             }
             {
               const { GITHUB_STEP_SUMMARY } = defaultEnv;
-              const { binDir, binName, ...debugData } = (
+              const debugDataList = (
                 await fs.readFile(installEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
                   .then(parseJsonLines)
-                  .then(debugDataList => (
-                    debugDataList.find(({ postinstallType }) => postinstallType === installEnv.POSTINSTALL_TYPE)
-                    ?? {}
-                  ))
                   .catch(error => {
-                    if (error.code === 'ENOENT') return {};
+                    if (error.code === 'ENOENT') return [];
                     throw error;
                   })
               );
+              const { binDir, binName, ...debugData } = (
+                debugDataList
+                  .find(({ postinstallType }) => postinstallType === installEnv.POSTINSTALL_TYPE)
+                ?? {}
+              );
               async function inspectInstalledBin(bindirPath) {
+                const showAll = !binName;
                 return await fs.readdir(bindirPath)
                   .then(files => {
+                    if (showAll) return inspect(files);
+
                     const { binFiles = [], otherFiles = [] } = files.reduce(
                       ({ binFiles = [], otherFiles = [] }, file) => {
-                        const isInstalledBin = !binName || file === binName || file.startsWith(`${binName}.`);
+                        const isInstalledBin = file === binName || file.startsWith(`${binName}.`);
                         (isInstalledBin ? binFiles : otherFiles).push(file);
                         return { binFiles, otherFiles };
                       },
@@ -432,6 +436,40 @@ jobs:
                       binDirUsingEnvNameList
                         .filter(({ envName }) => envName !== prefixEnvName)
                         .map(({ path }) => path),
+                      '//     ',
+                    ),
+                    await inspectInstalledBin(binDir),
+                    '```',
+                    '',
+                    '',
+                  ].join('\n'),
+                );
+              } else if (pmType === 'bun') {
+                const binCmdArgs = ['bun', 'pm', 'bin', '--global'];
+                const binDir = await exec.getExecOutput(
+                  binCmdArgs[0],
+                  binCmdArgs.slice(1),
+                  { env: installEnv },
+                )
+                  .then(({ stdout }) => stdout.trim());
+                const debugData = (
+                  debugDataList.find(({ postinstallType }) => postinstallType === installEnv.POSTINSTALL_TYPE)
+                  // Bun does not execute the "postinstall" script of installed dependencies.
+                  // Instead, it uses the debug data from the project's "postinstall" script.
+                  ?? debugDataList.find(({ postinstallType }) => /^Project$/i.test(postinstallType))
+                  ?? {}
+                );
+                await fs.appendFile(
+                  GITHUB_STEP_SUMMARY,
+                  [
+                    '```js',
+                    indentStr([
+                      `$(${binCmdArgs.join(' ')})`,
+                      `( ${binDir} )`,
+                    ].join('\n'), '// ', '// Files in '),
+                    ...insertHeader(
+                      '// This path can also be got using environment variables:',
+                      filepathUsingEnvNameList(binDir, debugData.env, installEnv).map(({ path }) => path),
                       '//     ',
                     ),
                     await inspectInstalledBin(binDir),
