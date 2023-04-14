@@ -199,10 +199,10 @@ jobs:
                 (_, offset) => offset === 0 ? firstPrefixStr : prefixStr,
               );
             }
-            function filepathUsingEnvNameList(filepath, env) {
+            function filepathUsingEnvNameList(filepath, env, excludeEnv = {}) {
               return Object.entries(env ?? {})
                 .flatMap(([key, value]) => {
-                  if (!value || /^(?:[A-Z]:)?[/\\]?$/i.test(value)) return [];
+                  if (!value || /^(?:[A-Z]:)?[/\\]?$/i.test(value) || excludeEnv[key] === value) return [];
 
                   if (filepath.startsWith(value)) {
                     return {
@@ -267,7 +267,7 @@ jobs:
             }
 
             const tarballPath = path.relative(process.cwd(), tarballFullpath);
-            let env = {
+            const installEnv = {
               ...process.env,
               POSTINSTALL_TYPE: 'Local Dependencies',
               DEBUG_DATA_JSON_LINES_PATH: path.join(
@@ -276,26 +276,26 @@ jobs:
               ),
             };
             if (pmType === 'npm') {
-              await exec.exec('npm install', [tarballPath], { env });
+              await exec.exec('npm install', [tarballPath], { env: installEnv });
             } else if (pmType === 'yarn') {
               if (packageManager.startsWith('yarn@1.')) {
-                await exec.exec('yarn add', [tarballPath], { env });
+                await exec.exec('yarn add', [tarballPath], { env: installEnv });
               } else {
-                await exec.exec('yarn add', [tarballPath.replaceAll(path.sep, '/')], { env });
+                await exec.exec('yarn add', [tarballPath.replaceAll(path.sep, '/')], { env: installEnv });
               }
             } else if (pmType === 'pnpm') {
-              await exec.exec('pnpm add', [tarballPath], { env });
+              await exec.exec('pnpm add', [tarballPath], { env: installEnv });
             } else if (pmType === 'bun') {
-              await exec.exec('bun add', [tarballPath], { env });
+              await exec.exec('bun add', [tarballPath], { env: installEnv });
             }
             {
               const { GITHUB_STEP_SUMMARY } = process.env;
               const binDir = path.resolve(process.cwd(), 'node_modules/.bin');
               const debugData = (
-                await fs.readFile(env.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
+                await fs.readFile(installEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
                   .then(parseJsonLines)
                   .then(debugDataList => (
-                    debugDataList.find(({ postinstallType }) => postinstallType === env.POSTINSTALL_TYPE)
+                    debugDataList.find(({ postinstallType }) => postinstallType === installEnv.POSTINSTALL_TYPE)
                     // Bun does not execute the "postinstall" script of installed dependencies.
                     // Instead, it uses the debug data from the project's "postinstall" script.
                     ?? debugDataList.find(({ postinstallType }) => pmType === 'bun' && /^Project$/i.test(postinstallType))
@@ -310,7 +310,7 @@ jobs:
                   `// Files in ${binDir}`,
                   ...insertHeader(
                     '// This path can also be got using environment variables:',
-                    filepathUsingEnvNameList(binDir, debugData.env ?? {}).map(({ path }) => path),
+                    filepathUsingEnvNameList(binDir, debugData.env, installEnv).map(({ path }) => path),
                     '//     ',
                   ),
                   inspect(await fs.readdir(binDir).catch(error => error)),
@@ -321,17 +321,17 @@ jobs:
               );
             }
 
-            env.POSTINSTALL_TYPE = 'Global Dependencies';
+            installEnv.POSTINSTALL_TYPE = 'Global Dependencies';
             if (pmType === 'npm') {
-              await exec.exec('npm install --global', [tarballPath], { env });
+              await exec.exec('npm install --global', [tarballPath], { env: installEnv });
             } else if (pmType === 'yarn') {
               if (packageManager.startsWith('yarn@1.')) {
-                await exec.exec('yarn global add', [tarballPath], { env });
+                await exec.exec('yarn global add', [tarballPath], { env: installEnv });
               } else {
                 // Note: On Windows, the "yarn dlx --package" command does not know the local filepath
                 // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
                 if (process.platform !== 'win32') {
-                  await exec.exec('yarn dlx --package', [path.resolve(tarballPath), 'bar'], { env });
+                  await exec.exec('yarn dlx --package', [path.resolve(tarballPath), 'bar'], { env: installEnv });
                 }
               }
             } else if (pmType === 'pnpm') {
@@ -339,28 +339,28 @@ jobs:
               // see https://github.com/pnpm/pnpm/issues/4658
               const PNPM_HOME = path.resolve(os.homedir(), '.pnpm-home');
               const pathEnv = Object.fromEntries(
-                Object.entries(env)
+                Object.entries(installEnv)
                   .filter(([key]) => /^PATH$/i.test(key))
                   .map(([key, value]) => [key, [value, PNPM_HOME].join(path.delimiter)])
               );
 
               await exec.exec('pnpm add --global', [path.resolve(tarballPath)], {
                 env: {
-                  ...env,
+                  ...installEnv,
                   ...pathEnv,
                   PNPM_HOME,
                 },
               });
             } else if (pmType === 'bun') {
-              await exec.exec('bun add --global', [path.resolve(tarballPath)], { env });
+              await exec.exec('bun add --global', [path.resolve(tarballPath)], { env: installEnv });
             }
             {
               const { GITHUB_STEP_SUMMARY } = process.env;
               const { binDir, binName, ...debugData } = (
-                await fs.readFile(env.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
+                await fs.readFile(installEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
                   .then(parseJsonLines)
                   .then(debugDataList => (
-                    debugDataList.find(({ postinstallType }) => postinstallType === env.POSTINSTALL_TYPE)
+                    debugDataList.find(({ postinstallType }) => postinstallType === installEnv.POSTINSTALL_TYPE)
                     ?? {}
                   ))
                   .catch(error => {
@@ -402,7 +402,7 @@ jobs:
                     `// Files in ${binDir}`,
                     ...insertHeader(
                       '// This path can also be got using environment variables:',
-                      filepathUsingEnvNameList(binDir, debugData.env ?? {}).map(({ path }) => path),
+                      filepathUsingEnvNameList(binDir, debugData.env, installEnv).map(({ path }) => path),
                       '//     ',
                     ),
                     await inspectInstalledBin(binDir),
@@ -418,7 +418,7 @@ jobs:
                   ? prefix
                   : path.join(prefix, 'bin');
 
-                const binDirUsingEnvNameList = filepathUsingEnvNameList(binDir, debugData.env ?? {});
+                const binDirUsingEnvNameList = filepathUsingEnvNameList(binDir, debugData.env, installEnv);
                 await fs.appendFile(
                   GITHUB_STEP_SUMMARY,
                   [
