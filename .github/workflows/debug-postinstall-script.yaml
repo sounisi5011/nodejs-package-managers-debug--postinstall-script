@@ -232,6 +232,14 @@ jobs:
                   return [];
                 })
             }
+            function yarnBerryAcceptsFullpath(absolutePath) {
+              absolutePath = path.resolve(absolutePath);
+              if (process.platform === 'win32') {
+                // Remove Windows drive letter and replace path separator with slash
+                absolutePath = absolutePath.replace(/(?:^[A-Z]:)?\\/gi, '/');
+              }
+              return absolutePath;
+            }
 
             const tarballFullpath = await core.group('Move debugger package tarball', async () => {
               const rootDir = path.resolve(process.cwd(), '/');
@@ -300,7 +308,7 @@ jobs:
               if (packageManager.startsWith('yarn@1.')) {
                 await exec.exec('yarn add', [tarballFullpath], { env: installEnv });
               } else {
-                await exec.exec('yarn add', [tarballFullpath.replace(/^[A-Z]:(?=\\)/i, '').replaceAll(path.sep, '/')], { env: installEnv });
+                await exec.exec('yarn add', [yarnBerryAcceptsFullpath(tarballFullpath)], { env: installEnv });
               }
             } else if (pmType === 'pnpm') {
               await exec.exec('pnpm add', [tarballFullpath], { env: installEnv });
