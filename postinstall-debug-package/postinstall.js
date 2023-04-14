@@ -6,6 +6,15 @@ const { inspect, promisify } = require('util');
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
+const packageManager = (() => {
+  const matchGroups = process.env.npm_config_user_agent?.match(
+    /^(?<name>[^/ ]*)(?:\/(?<version>[^ ]*))?/,
+  )?.groups;
+  if (!matchGroups) return;
+  const { name = '', version = '' } = matchGroups;
+  return { name, version };
+})();
+
 let isGlobalMode = false;
 // In npm and pnpm, global mode can be detected by reading the "npm_config_global" environment variable.
 // Older npm defines this for local mode as well, so make sure it is equal to "'true'".
@@ -15,9 +24,8 @@ if (process.env.npm_config_global === 'true') {
 // In Yarn v1, global mode can be detected by reading the "npm_config_argv" environment variable.
 // This value is a JSON string containing the original arguments passed to the "yarn" command.
 // It is parsed to check if the called subcommand is "yarn global add".
-const isYarn1 = (process.env.npm_config_user_agent || '')?.startsWith(
-  'yarn/1.',
-);
+const isYarn1 =
+  packageManager?.name === 'yarn' && packageManager.version.startsWith('1.');
 if (isYarn1 && process.env.npm_config_argv) {
   const npmArgv = JSON.parse(process.env.npm_config_argv);
   if (Array.isArray(npmArgv?.original)) {
@@ -95,10 +103,9 @@ const postinstallType =
  *   stdout: string,
  *   stderr: string,
  *   commandAndArgs: string[],
- *   actualCommandAndArgs: string[],
  * }>}
  */
-async function crossExec(commandAndArgs) {
+async function execPackageManagerCommand(commandAndArgs) {
   const command = commandAndArgs[0];
   const args = commandAndArgs.slice(1);
 
@@ -113,17 +120,14 @@ async function crossExec(commandAndArgs) {
     const execpathIsJS = /\.[cm]?js$/.test(
       path.extname(process.env.npm_execpath),
     );
-    const actualCommandAndArgs = execpathIsJS
+    const commandAndArgs = execpathIsJS
       ? [process.execPath, process.env.npm_execpath, ...args]
       : [process.env.npm_execpath, ...args];
-    const additionalProperties = { commandAndArgs, actualCommandAndArgs };
+    const additionalProperties = { commandAndArgs };
 
     try {
       return Object.assign(
-        await execFileAsync(
-          actualCommandAndArgs[0],
-          actualCommandAndArgs.slice(1),
-        ),
+        await execFileAsync(commandAndArgs[0], commandAndArgs.slice(1)),
         additionalProperties,
       );
     } catch (error) {
@@ -131,10 +135,7 @@ async function crossExec(commandAndArgs) {
     }
   }
 
-  const additionalProperties = {
-    commandAndArgs,
-    actualCommandAndArgs: commandAndArgs,
-  };
+  const additionalProperties = { commandAndArgs };
   try {
     return Object.assign(
       process.platform === 'win32'
@@ -161,25 +162,33 @@ async function crossExec(commandAndArgs) {
     .catch(() => undefined);
   const binName = Object.keys(pkg?.bin ?? {})[0];
 
-  const binCommandResult = await crossExec(
-    isYarn1
-      ? isGlobalMode
-        ? ['yarn', 'global', 'bin']
-        : ['yarn', 'bin']
-      : (process.env.npm_config_user_agent || '')?.startsWith('pnpm/')
-      ? ['pnpm', 'bin'].concat(isGlobalMode ? '--global' : [])
-      : ['npm', 'bin'].concat(isGlobalMode ? '--global' : []),
-  ).catch((error) => ({ error }));
-  /** @type {string[]} */
-  const binCommandArgs =
-    'error' in binCommandResult
-      ? binCommandResult.error.commandAndArgs
-      : binCommandResult.commandAndArgs;
-  const binDir =
-    'stdout' in binCommandResult ? binCommandResult.stdout.trim() : null;
+  const binCommandArgs = isYarn1
+    ? isGlobalMode
+      ? ['yarn', 'global', 'bin']
+      : ['yarn', 'bin']
+    : packageManager?.name === 'pnpm'
+    ? ['pnpm', 'bin'].concat(isGlobalMode ? '--global' : [])
+    : packageManager?.name === 'npm'
+    ? ['npm', 'bin'].concat(isGlobalMode ? '--global' : [])
+    : null;
+  const binCommandResult =
+    binCommandArgs &&
+    (await execPackageManagerCommand(binCommandArgs).catch((error) => ({
+      error,
+    })));
+  /** @type {{ args: string[], result: string | null } | null} */
+  const binCommand =
+    binCommandArgs && binCommandResult
+      ? {
+          args: binCommandArgs,
+          result:
+            'error' in binCommandResult ? null : binCommandResult.stdout.trim(),
+        }
+      : null;
+
   const binFilepathList = binName
     ? await findBin(
-        [cwd].concat(binDir || []),
+        [cwd].concat(binCommand?.result || []),
         isGlobalMode
           ? // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
             ['bin', '']
@@ -193,7 +202,9 @@ async function crossExec(commandAndArgs) {
     cwd,
     isGlobalMode,
     realBin: binFilepathList,
-    [binCommandArgs.join(' ')]: binCommandResult,
+    ...(binCommand?.args
+      ? { [binCommand.args.join(' ')]: binCommandResult }
+      : {}),
     env: Object.fromEntries(
       Object.entries(process.env).filter(([key]) =>
         /^(?:npm|yarn|pnpm|bun)_/i.test(key),
@@ -229,10 +240,7 @@ async function crossExec(commandAndArgs) {
     const jsonStr = JSON.stringify({
       postinstallType: postinstallType ?? null,
       cwd,
-      binCommand: {
-        args: binCommandArgs,
-        result: binDir,
-      },
+      binCommand,
       isGlobalMode,
       binName: binName ?? null,
       env: Object.fromEntries(
