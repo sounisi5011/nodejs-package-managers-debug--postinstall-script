@@ -16,10 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       repo-dirname: repo
+      workspace-dirname: path/to/foo/bar
       artifact-name: debug-package@${{ github.event.number && format('pr-{0}', github.event.number) || github.sha }}
       archive-filename: debug-package.tar.zst
       tarball-name: foo.tgz
     outputs:
+      workspace-dirname: ${{ env.workspace-dirname }}
       artifact-name: ${{ env.artifact-name }}
       archive-filename: ${{ env.archive-filename }}
       tarball-name: ${{ env.tarball-name }}
@@ -39,9 +41,11 @@ jobs:
               mv ./*.tgz "${root_path}/${{ env.tarball-name }}"
             }
           )
+          mkdir -p ./'${{ env.workspace-dirname }}'
           {
             echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project"'
-          } > ./package.json
+          } > ./'${{ env.workspace-dirname }}'/package.json
+          echo '{}' ./package.json
 
           find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
             | xargs -0 tar -c --file './${{ env.archive-filename }}' --zstd --verbose
@@ -251,6 +255,10 @@ jobs:
               console.log({ tarballPath: origTarballPath });
               return origTarballPath;
             });
+
+            const newCWD = path.resolve('${{ needs.setup.outputs.workspace-dirname }}', 'sub-dir/hoge');
+            await fs.mkdir(newCWD, { recursive: true });
+            process.chdir(newCWD);
 
             const defaultEnv = Object.fromEntries(
               Object.entries(process.env)
