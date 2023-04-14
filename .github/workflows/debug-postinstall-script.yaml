@@ -260,14 +260,14 @@ jobs:
             const packageManager = '${{ matrix.package-manager }}';
             const pmType = packageManager.replace(/@.+$/s, '');
             await core.group('Show node and package manager version', async () => {
-              await exec.exec('node --version', { env: defaultEnv });
+              await exec.exec('node --version', [], { env: defaultEnv });
               await exec.exec(pmType, ['--version'], { env: defaultEnv });
             });
 
             if (pmType === 'yarn' && !packageManager.startsWith('yarn@1.')) {
               // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
               await core.group('Setup', async () => {
-                await exec.exec('yarn config set enableImmutableInstalls false', { env: defaultEnv });
+                await exec.exec('yarn config set enableImmutableInstalls false', [], { env: defaultEnv });
               });
             }
 
