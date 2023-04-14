@@ -259,13 +259,7 @@ jobs:
 
             const newCWD = path.resolve('${{ needs.setup.outputs.workspace-dirname }}', 'sub-dir/hoge');
             await fs.mkdir(newCWD, { recursive: true });
-            ///// DEBUG /////
-            console.log({ cwd: path.resolve('./'), 'process.cwd': process.cwd() });
-            ///// DEBUG /////
             process.chdir(newCWD);
-            ///// DEBUG /////
-            console.log({ cwd: path.resolve('./'), 'process.cwd': process.cwd() });
-            ///// DEBUG /////
 
             const defaultEnv = Object.fromEntries(
               Object.entries(process.env)
