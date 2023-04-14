@@ -202,7 +202,7 @@ jobs:
             function filepathUsingEnvNameList(filepath, env, excludeEnv = {}) {
               return Object.entries(env ?? {})
                 .flatMap(([key, value]) => {
-                  if (!value || /^(?:[A-Z]:)?[/\\]$/i.test(value) || excludeEnv[key] === value) return [];
+                  if (!value || /^(?:[A-Z]:)?[/\\]?$/i.test(value) || excludeEnv[key] === value) return [];
 
                   if (filepath.startsWith(value)) {
                     return {
