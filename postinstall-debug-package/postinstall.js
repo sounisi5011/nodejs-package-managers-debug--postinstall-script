@@ -161,6 +161,7 @@ async function execPackageManagerCommand(commandAndArgs) {
  */
 async function getEnvAddedByPackageManager(env = process.env) {
   const specialenvName = 'DEBUG_ORIGINAL_ENV_JSON_PATH';
+  /** @type {Record<string, unknown> | null} */
   const origEnv = env[specialenvName]
     ? await readFile(env[specialenvName], 'utf8').then(JSON.parse)
     : null;
@@ -177,10 +178,47 @@ async function getEnvAddedByPackageManager(env = process.env) {
   }
 
   return Object.fromEntries(
-    envEntries.filter(
-      ([key, value]) =>
-        key === specialenvName || (origEnv[key] ?? undefined) !== value,
-    ),
+    envEntries
+      .filter(
+        ([key, value]) =>
+          key === specialenvName || (origEnv[key] ?? undefined) !== value,
+      )
+      .map(([key, value]) => {
+        const origValue = origEnv[key];
+        if (
+          /^PATH$/i.test(key) &&
+          typeof value === 'string' &&
+          typeof origValue === 'string'
+        ) {
+          return [
+            key,
+            // Omit duplicate $PATH values
+            Object.assign(value, {
+              /**
+               * @this {String}
+               * @param {number} _depth
+               * @param {import('util').InspectOptions} options
+               * @returns {string}
+               */
+              [inspect.custom](_depth, options) {
+                const value = this.valueOf();
+                return inspect(
+                  value,
+                  typeof value === 'string' &&
+                    origValue.length < value.length &&
+                    value.endsWith(origValue)
+                    ? {
+                        ...options,
+                        maxStringLength: value.length - origValue.length,
+                      }
+                    : options,
+                );
+              },
+            }),
+          ];
+        }
+        return [key, value];
+      }),
   );
 }
 
