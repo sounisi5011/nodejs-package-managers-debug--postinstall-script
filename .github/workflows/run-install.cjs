@@ -201,7 +201,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         const pkgJsonPath = path.resolve('package.json');
         const pkgJson = {
           scripts: {
-            postinstall: `node ./postinstall.js --type="Project (${caseName})"`,
+            postinstall: `node ./postinstall.js --type='Project (${caseName})'`,
           },
         };
         await fs.copyFile(postinstallFullpath, './postinstall.js');
