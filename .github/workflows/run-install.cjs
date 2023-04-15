@@ -211,6 +211,12 @@ module.exports = async ({ core, exec, require, packageManager }) => {
           // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
           await fs.writeFile('.yarnrc.yml', 'enableImmutableInstalls: false');
         }
+        if (pmType === 'pnpm') {
+          // pnpm v7 will not run the "postinstall" script if the dependency is already cached.
+          // Set side-effects-cache to "false" to always run the "postinstall" script.
+          // see https://github.com/pnpm/pnpm/issues/4649
+          await fs.writeFile('.npmrc', 'side-effects-cache = false');
+        }
 
         const { expectedLocalPrefix } = await setup({ pkgJson });
         await fs.writeFile(pkgJsonPath, JSON.stringify(pkgJson));
