@@ -166,59 +166,57 @@ async function getEnvAddedByPackageManager(env = process.env) {
     ? await readFile(env[specialenvName], 'utf8').then(JSON.parse)
     : null;
 
-  const envEntries = Object.entries(env);
-  if (!origEnv) {
-    return Object.fromEntries(
-      envEntries.filter(([key]) =>
-        /^(?:DISABLE_)?(?:npm|yarn|PNPM|BUN)_|^(?:INIT_CWD|PROJECT_CWD)$/i.test(
-          key,
-        ),
-      ),
-    );
+  /**
+   * @this {NodeJS.ProcessEnv}
+   * @param {number} _depth
+   * @param {import('util').InspectOptions} options
+   * @param {import('util').inspect} inspect
+   */
+  function customInspect(_depth, options, inspect) {
+    const entries = Object.entries(this).map(([key, value]) => [
+      key,
+      {
+        /**
+         * @param {number} _depth
+         * @param {import('util').InspectOptions} options
+         * @param {import('util').inspect} inspect
+         */
+        [inspect.custom](_depth, options, inspect) {
+          const origValue = origEnv?.[key];
+          if (
+            /^PATH$/i.test(key) &&
+            typeof value === 'string' &&
+            typeof origValue === 'string' &&
+            origValue.length < value.length &&
+            value.endsWith(origValue)
+          ) {
+            // Omit duplicate $PATH values
+            return inspect(value, {
+              ...options,
+              maxStringLength: value.length - origValue.length,
+            });
+          }
+          return inspect(value, options);
+        },
+      },
+    ]);
+    return inspect(Object.fromEntries(entries), options);
   }
 
-  return Object.fromEntries(
-    envEntries
-      .filter(
-        ([key, value]) =>
-          key !== specialenvName && (origEnv[key] ?? undefined) !== value,
-      )
-      .map(([key, value]) => {
-        const origValue = origEnv[key];
-        if (
-          /^PATH$/i.test(key) &&
-          typeof value === 'string' &&
-          typeof origValue === 'string'
-        ) {
-          return [
-            key,
-            // Omit duplicate $PATH values
-            Object.assign(value, {
-              /**
-               * @this {String}
-               * @param {number} _depth
-               * @param {import('util').InspectOptions} options
-               * @returns {string}
-               */
-              [inspect.custom](_depth, options) {
-                const value = this.valueOf();
-                return inspect(
-                  value,
-                  typeof value === 'string' &&
-                    origValue.length < value.length &&
-                    value.endsWith(origValue)
-                    ? {
-                        ...options,
-                        maxStringLength: value.length - origValue.length,
-                      }
-                    : options,
-                );
-              },
-            }),
-          ];
-        }
-        return [key, value];
-      }),
+  const envEntries = Object.entries(env);
+  return Object.assign(
+    Object.fromEntries(
+      envEntries.filter(
+        origEnv
+          ? ([key, value]) =>
+              key !== specialenvName && (origEnv[key] ?? undefined) !== value
+          : ([key]) =>
+              /^(?:DISABLE_)?(?:npm|yarn|PNPM|BUN)_|^(?:INIT_CWD|PROJECT_CWD)$/i.test(
+                key,
+              ),
+      ),
+    ),
+    { [inspect.custom]: customInspect },
   );
 }
 
