@@ -1,6 +1,8 @@
 *
 !*/
 !*.js
+!*.cjs
+!*.mjs
 !*.json
 !*.json5
 !*.md
