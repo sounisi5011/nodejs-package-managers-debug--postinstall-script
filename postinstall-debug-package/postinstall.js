@@ -181,7 +181,7 @@ async function getEnvAddedByPackageManager(env = process.env) {
     envEntries
       .filter(
         ([key, value]) =>
-          key === specialenvName || (origEnv[key] ?? undefined) !== value,
+          key !== specialenvName && (origEnv[key] ?? undefined) !== value,
       )
       .map(([key, value]) => {
         const origValue = origEnv[key];
