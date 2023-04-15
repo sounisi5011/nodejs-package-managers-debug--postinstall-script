@@ -1,5 +1,12 @@
 // @ts-check
 
+/**
+ * @param {object} args
+ * @param {import('@actions/core')} args.core
+ * @param {import('@actions/exec')} args.exec
+ * @param {typeof require} args.require
+ * @param {string} args.packageManager
+ */
 module.exports = async ({core, exec, require, packageManager }) => {
   const fs = require('fs/promises');
   const os = require('os');
