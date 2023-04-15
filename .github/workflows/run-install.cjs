@@ -169,14 +169,14 @@ module.exports = async ({ core, exec, require, packageManager }) => {
    * }>}
    */
   const localInstallCases = {
-    'Same location as `package.json`': {
+    '`package.json` exists in the same directory': {
       async setup() {
         return {
           expectedLocalPrefix: process.cwd(),
         };
       },
     },
-    'In a subdirectory of the directory where the `package.json` is located': {
+    '`package.json` exists in the ancestor directory': {
       async setup() {
         const expectedLocalPrefix = process.cwd();
 
