@@ -201,12 +201,10 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         const pkgJsonPath = path.resolve('package.json');
         const pkgJson = {
           scripts: {
-            postinstall: `node "${path.relative(
-              '.',
-              postinstallFullpath,
-            )}" --type="Project (${caseName})"`,
+            postinstall: `node ./postinstall.js --type="Project (${caseName})"`,
           },
         };
+        await fs.copyFile(postinstallFullpath, './postinstall.js');
         if (isYarnBerry) {
           await fs.writeFile('yarn.lock', new Uint8Array(0));
           // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
