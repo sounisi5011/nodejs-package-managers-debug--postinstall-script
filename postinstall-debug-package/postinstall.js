@@ -157,9 +157,14 @@ async function execPackageManagerCommand(commandAndArgs) {
 
 /**
  * @param {NodeJS.ProcessEnv} env
+ * @param {object} [options]
+ * @param {string} [options.cwd]
  * @returns {Promise<NodeJS.ProcessEnv>}
  */
-async function getEnvAddedByPackageManager(env = process.env) {
+async function getEnvAddedByPackageManager(
+  env = process.env,
+  { cwd = process.cwd() } = {},
+) {
   const specialenvName = 'DEBUG_ORIGINAL_ENV_JSON_PATH';
   /** @type {Record<string, unknown> | null} */
   const origEnv = env[specialenvName]
@@ -206,6 +211,15 @@ async function getEnvAddedByPackageManager(env = process.env) {
               );
             }
             commentList = ['PATH List:', ...pathList];
+          } else if (typeof value === 'string' && value.startsWith(cwd)) {
+            commentList = [
+              'Equal to this:',
+              `  process.cwd()${
+                value !== cwd
+                  ? ` + ${inspect(value.substring(cwd.length))}`
+                  : ''
+              }`,
+            ];
           }
 
           const inspectResult = inspect(value, writableOptions);
@@ -288,7 +302,7 @@ async function getEnvAddedByPackageManager(env = process.env) {
     ...(binCommand?.args
       ? { [binCommand.args.join(' ')]: binCommandResult }
       : {}),
-    env: await getEnvAddedByPackageManager(process.env),
+    env: await getEnvAddedByPackageManager(process.env, { cwd }),
   };
   if (postinstallType) console.log(postinstallType);
   console.log(debugData);
