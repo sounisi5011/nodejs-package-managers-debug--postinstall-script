@@ -159,17 +159,24 @@ async function execPackageManagerCommand(commandAndArgs) {
  * @param {NodeJS.ProcessEnv} env
  * @param {object} [options]
  * @param {string} [options.cwd]
+ * @param {Record<string, string | null | undefined>} [options.prefixesToCompareRecord]
  * @returns {Promise<NodeJS.ProcessEnv>}
  */
 async function getEnvAddedByPackageManager(
   env = process.env,
-  { cwd = process.cwd() } = {},
+  { cwd = process.cwd(), prefixesToCompareRecord } = {},
 ) {
   const specialenvName = 'DEBUG_ORIGINAL_ENV_JSON_PATH';
   /** @type {Record<string, unknown> | null} */
   const origEnv = env[specialenvName]
     ? await readFile(env[specialenvName], 'utf8').then(JSON.parse)
     : null;
+  const prefixRecord = Object.assign(
+    {
+      'process.cwd()': cwd,
+    },
+    prefixesToCompareRecord,
+  );
 
   /**
    * @this {NodeJS.ProcessEnv}
@@ -211,15 +218,21 @@ async function getEnvAddedByPackageManager(
               );
             }
             commentList = ['PATH List:', ...pathList];
-          } else if (typeof value === 'string' && value.startsWith(cwd)) {
-            commentList = [
-              'Equal to this:',
-              `  process.cwd()${
-                value !== cwd
-                  ? ` + ${inspect(value.substring(cwd.length))}`
-                  : ''
-              }`,
-            ];
+          } else if (typeof value === 'string') {
+            const compareList = Object.entries(prefixRecord).flatMap(
+              ([name, prefix]) => {
+                if (typeof prefix === 'string' && value.startsWith(prefix))
+                  return `  ${name}${
+                    value !== prefix
+                      ? ` + ${inspect(value.substring(prefix.length))}`
+                      : ''
+                  }`;
+                return [];
+              },
+            );
+            if (0 < compareList.length) {
+              commentList = ['Equal to this:', ...compareList];
+            }
           }
 
           const inspectResult = inspect(value, writableOptions);
@@ -295,14 +308,23 @@ async function getEnvAddedByPackageManager(
       )
     : undefined;
 
+  const expectedValues = Object.fromEntries(
+    Object.entries({
+      expectedLocalPrefix: process.env.DEBUG_EXPECTED_LOCAL_PREFIX,
+    }).filter(([, value]) => value !== undefined),
+  );
   const debugData = {
     cwd,
+    ...expectedValues,
     isGlobalMode,
     realBin: binFilepathList,
     ...(binCommand?.args
       ? { [binCommand.args.join(' ')]: binCommandResult }
       : {}),
-    env: await getEnvAddedByPackageManager(process.env, { cwd }),
+    env: await getEnvAddedByPackageManager(process.env, {
+      cwd,
+      prefixesToCompareRecord: expectedValues,
+    }),
   };
   if (postinstallType) console.log(postinstallType);
   console.log(debugData);
