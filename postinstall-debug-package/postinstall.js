@@ -157,68 +157,111 @@ async function execPackageManagerCommand(commandAndArgs) {
 
 /**
  * @param {NodeJS.ProcessEnv} env
+ * @param {object} [options]
+ * @param {string} [options.cwd]
+ * @param {Record<string, string | null | undefined>} [options.prefixesToCompareRecord]
  * @returns {Promise<NodeJS.ProcessEnv>}
  */
-async function getEnvAddedByPackageManager(env = process.env) {
+async function getEnvAddedByPackageManager(
+  env = process.env,
+  { cwd = process.cwd(), prefixesToCompareRecord } = {},
+) {
   const specialenvName = 'DEBUG_ORIGINAL_ENV_JSON_PATH';
   /** @type {Record<string, unknown> | null} */
   const origEnv = env[specialenvName]
     ? await readFile(env[specialenvName], 'utf8').then(JSON.parse)
     : null;
+  const prefixRecord = Object.assign(
+    {
+      'process.cwd()': cwd,
+    },
+    prefixesToCompareRecord,
+  );
 
-  const envEntries = Object.entries(env);
-  if (!origEnv) {
-    return Object.fromEntries(
-      envEntries.filter(([key]) =>
-        /^(?:DISABLE_)?(?:npm|yarn|PNPM|BUN)_|^(?:INIT_CWD|PROJECT_CWD)$/i.test(
-          key,
-        ),
-      ),
-    );
+  /**
+   * @this {NodeJS.ProcessEnv}
+   * @param {number} _depth
+   * @param {Readonly<import('util').InspectOptions>} options
+   * @param {import('util').inspect} inspect
+   */
+  function customInspect(_depth, options, inspect) {
+    const entries = Object.entries(this).map(([key, value]) => [
+      key,
+      {
+        /**
+         * @param {number} _depth
+         * @param {Readonly<import('util').InspectOptions>} options
+         * @param {import('util').inspect} inspect
+         */
+        [inspect.custom](_depth, options, inspect) {
+          const writableOptions = { ...options };
+          const origValue = origEnv?.[key];
+          /** @type {string[]} */
+          let commentList = [];
+
+          if (/^PATH$/i.test(key) && typeof value === 'string') {
+            const pathList = value
+              .split(path.delimiter)
+              .map((path) => `- ${path}`);
+            if (
+              typeof origValue === 'string' &&
+              origValue.length < value.length &&
+              value.endsWith(origValue)
+            ) {
+              // Omit duplicate $PATH values
+              writableOptions.maxStringLength = value.length - origValue.length;
+              const origPathLength = origValue.split(path.delimiter).length;
+              pathList.splice(
+                -origPathLength,
+                origPathLength,
+                `... ${origPathLength} more paths`,
+              );
+            }
+            commentList = ['PATH List:', ...pathList];
+          } else if (typeof value === 'string') {
+            const compareList = Object.entries(prefixRecord).flatMap(
+              ([name, prefix]) => {
+                if (typeof prefix === 'string' && value.startsWith(prefix))
+                  return `  ${name}${
+                    value !== prefix
+                      ? ` + ${inspect(value.substring(prefix.length))}`
+                      : ''
+                  }`;
+                return [];
+              },
+            );
+            if (0 < compareList.length) {
+              commentList = ['Equal to this:', ...compareList];
+            }
+          }
+
+          const inspectResult = inspect(value, writableOptions);
+          return 0 < commentList.length
+            ? `(\n${(
+                inspectResult +
+                commentList.map((comment) => `\n// ${comment}`).join('')
+              ).replace(/^(?!$)/gm, '  ')}\n)`
+            : inspectResult;
+        },
+      },
+    ]);
+    return inspect(Object.fromEntries(entries), options);
   }
 
-  return Object.fromEntries(
-    envEntries
-      .filter(
-        ([key, value]) =>
-          key === specialenvName || (origEnv[key] ?? undefined) !== value,
-      )
-      .map(([key, value]) => {
-        const origValue = origEnv[key];
-        if (
-          /^PATH$/i.test(key) &&
-          typeof value === 'string' &&
-          typeof origValue === 'string'
-        ) {
-          return [
-            key,
-            // Omit duplicate $PATH values
-            Object.assign(value, {
-              /**
-               * @this {String}
-               * @param {number} _depth
-               * @param {import('util').InspectOptions} options
-               * @returns {string}
-               */
-              [inspect.custom](_depth, options) {
-                const value = this.valueOf();
-                return inspect(
-                  value,
-                  typeof value === 'string' &&
-                    origValue.length < value.length &&
-                    value.endsWith(origValue)
-                    ? {
-                        ...options,
-                        maxStringLength: value.length - origValue.length,
-                      }
-                    : options,
-                );
-              },
-            }),
-          ];
-        }
-        return [key, value];
-      }),
+  const envEntries = Object.entries(env);
+  return Object.assign(
+    Object.fromEntries(
+      envEntries.filter(
+        origEnv
+          ? ([key, value]) =>
+              key !== specialenvName && (origEnv[key] ?? undefined) !== value
+          : ([key]) =>
+              /^(?:DISABLE_)?(?:npm|yarn|PNPM|BUN)_|^(?:INIT_CWD|PROJECT_CWD)$/i.test(
+                key,
+              ),
+      ),
+    ),
+    { [inspect.custom]: customInspect },
   );
 }
 
@@ -265,14 +308,23 @@ async function getEnvAddedByPackageManager(env = process.env) {
       )
     : undefined;
 
+  const expectedValues = Object.fromEntries(
+    Object.entries({
+      expectedLocalPrefix: process.env.DEBUG_EXPECTED_LOCAL_PREFIX,
+    }).filter(([, value]) => value !== undefined),
+  );
   const debugData = {
     cwd,
+    ...expectedValues,
     isGlobalMode,
     realBin: binFilepathList,
     ...(binCommand?.args
       ? { [binCommand.args.join(' ')]: binCommandResult }
       : {}),
-    env: await getEnvAddedByPackageManager(process.env),
+    env: await getEnvAddedByPackageManager(process.env, {
+      cwd,
+      prefixesToCompareRecord: expectedValues,
+    }),
   };
   if (postinstallType) console.log(postinstallType);
   console.log(debugData);

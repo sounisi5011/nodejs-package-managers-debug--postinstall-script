@@ -297,11 +297,13 @@ jobs:
             }
 
             const tmpDirpath = await fs.mkdtemp(os.tmpdir() + path.sep);
+            const expectedLocalPrefix = workspaceRootpath;
             const installEnv = {
               ...defaultEnv,
               POSTINSTALL_TYPE: 'Local Dependencies',
               DEBUG_DATA_JSON_LINES_PATH: path.join(tmpDirpath, 'debug-data.jsonl'),
               DEBUG_ORIGINAL_ENV_JSON_PATH: path.join(tmpDirpath, 'orig-env.json'),
+              DEBUG_EXPECTED_LOCAL_PREFIX: expectedLocalPrefix,
             };
             await fs.writeFile(
               installEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
@@ -322,7 +324,7 @@ jobs:
             }
             {
               const { GITHUB_STEP_SUMMARY } = defaultEnv;
-              const binDir = path.resolve(workspaceRootpath, 'node_modules/.bin');
+              const binDir = path.resolve(expectedLocalPrefix, 'node_modules/.bin');
               const debugData = (
                 await fs.readFile(installEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
                   .then(parseJsonLines)
@@ -354,6 +356,7 @@ jobs:
             }
 
             installEnv.POSTINSTALL_TYPE = 'Global Dependencies';
+            installEnv.DEBUG_EXPECTED_LOCAL_PREFIX = undefined;
             await fs.writeFile(
               installEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
               JSON.stringify(installEnv, (_, value) => value === undefined ? null : value),
