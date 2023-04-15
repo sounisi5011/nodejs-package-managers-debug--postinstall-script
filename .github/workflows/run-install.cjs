@@ -199,9 +199,10 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         process.chdir(await fs.mkdtemp(origCWD + path.sep));
 
         const pkgJsonPath = path.resolve('package.json');
+        const shellQuotChar = process.platform === 'win32' ? `"` : `'`;
         const pkgJson = {
           scripts: {
-            postinstall: `node ./postinstall.js --type='Project (${caseName})'`,
+            postinstall: `node ./postinstall.js --type=${shellQuotChar}Project (${caseName})${shellQuotChar}`,
           },
         };
         await fs.copyFile(postinstallFullpath, './postinstall.js');
