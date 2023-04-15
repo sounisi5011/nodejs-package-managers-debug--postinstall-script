@@ -169,7 +169,7 @@ async function getEnvAddedByPackageManager(env = process.env) {
   /**
    * @this {NodeJS.ProcessEnv}
    * @param {number} _depth
-   * @param {import('util').InspectOptions} options
+   * @param {Readonly<import('util').InspectOptions>} options
    * @param {import('util').inspect} inspect
    */
   function customInspect(_depth, options, inspect) {
@@ -178,25 +178,43 @@ async function getEnvAddedByPackageManager(env = process.env) {
       {
         /**
          * @param {number} _depth
-         * @param {import('util').InspectOptions} options
+         * @param {Readonly<import('util').InspectOptions>} options
          * @param {import('util').inspect} inspect
          */
         [inspect.custom](_depth, options, inspect) {
+          const writableOptions = { ...options };
           const origValue = origEnv?.[key];
-          if (
-            /^PATH$/i.test(key) &&
-            typeof value === 'string' &&
-            typeof origValue === 'string' &&
-            origValue.length < value.length &&
-            value.endsWith(origValue)
-          ) {
-            // Omit duplicate $PATH values
-            return inspect(value, {
-              ...options,
-              maxStringLength: value.length - origValue.length,
-            });
+          /** @type {string[]} */
+          let commentList = [];
+
+          if (/^PATH$/i.test(key) && typeof value === 'string') {
+            const pathList = value
+              .split(path.delimiter)
+              .map((path) => `- ${path}`);
+            if (
+              typeof origValue === 'string' &&
+              origValue.length < value.length &&
+              value.endsWith(origValue)
+            ) {
+              // Omit duplicate $PATH values
+              writableOptions.maxStringLength = value.length - origValue.length;
+              const origPathLength = origValue.split(path.delimiter).length;
+              pathList.splice(
+                -origPathLength,
+                origPathLength,
+                `... ${origPathLength} more paths`,
+              );
+            }
+            commentList = ['PATH List:', ...pathList];
           }
-          return inspect(value, options);
+
+          const inspectResult = inspect(value, writableOptions);
+          return 0 < commentList.length
+            ? `(\n${(
+                inspectResult +
+                commentList.map((comment) => `\n// ${comment}`).join('')
+              ).replace(/^(?!$)/gm, '  ')}\n)`
+            : inspectResult;
         },
       },
     ]);
