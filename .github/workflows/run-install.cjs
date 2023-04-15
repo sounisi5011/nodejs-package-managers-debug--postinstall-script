@@ -146,11 +146,7 @@ module.exports = async ({
   );
 
   const workspaceRootpath = path.resolve(workspaceDirname);
-  {
-    const newCWD = path.resolve(workspaceRootpath, 'sub-dir/hoge');
-    await fs.mkdir(newCWD, { recursive: true });
-    process.chdir(newCWD);
-  }
+  const postinstallFullpath = path.resolve(workspaceRootpath, 'postinstall.js');
 
   const defaultEnv = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -167,88 +163,158 @@ module.exports = async ({
     await exec.exec(pmType, ['--version'], { env: defaultEnv });
   });
 
-  if (pmType === 'yarn' && !packageManager.startsWith('yarn@1.')) {
-    // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
-    await core.group('Setup', async () => {
-      await exec.exec('yarn config set enableImmutableInstalls false', [], {
-        env: defaultEnv,
-      });
-    });
-  }
-
+  const isYarnBerry =
+    pmType === 'yarn' && !packageManager.startsWith('yarn@1.');
   const tmpDirpath = await fs.mkdtemp(os.tmpdir() + path.sep);
-  const expectedLocalPrefix = workspaceRootpath;
   const installEnv = {
     ...defaultEnv,
-    POSTINSTALL_TYPE: 'Local Dependencies',
     DEBUG_DATA_JSON_LINES_PATH: path.join(tmpDirpath, 'debug-data.jsonl'),
     DEBUG_ORIGINAL_ENV_JSON_PATH: path.join(tmpDirpath, 'orig-env.json'),
-    DEBUG_EXPECTED_LOCAL_PREFIX: expectedLocalPrefix,
   };
-  await fs.writeFile(
-    installEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
-    JSON.stringify(installEnv, (_, value) =>
-      value === undefined ? null : value,
-    ),
-  );
-  if (pmType === 'npm') {
-    await exec.exec('npm install', [tarballFullpath], { env: installEnv });
-  } else if (pmType === 'yarn') {
-    if (packageManager.startsWith('yarn@1.')) {
-      await exec.exec('yarn add', [tarballFullpath], { env: installEnv });
-    } else {
-      await exec.exec('yarn add', [yarnBerryAcceptsFullpath(tarballFullpath)], {
-        env: installEnv,
-      });
-    }
-  } else if (pmType === 'pnpm') {
-    await exec.exec('pnpm add', [tarballFullpath], { env: installEnv });
-  } else if (pmType === 'bun') {
-    await exec.exec('bun add', [tarballFullpath], { env: installEnv });
-  }
-  {
-    const { GITHUB_STEP_SUMMARY } = defaultEnv;
-    const binDir = path.resolve(expectedLocalPrefix, 'node_modules/.bin');
-    const debugData = await fs
-      .readFile(installEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
-      .then(parseJsonLines)
-      .then(
-        (debugDataList) =>
-          debugDataList.find(
-            ({ postinstallType }) =>
-              postinstallType === installEnv.POSTINSTALL_TYPE,
-          ) ??
-          // Bun does not execute the "postinstall" script of installed dependencies.
-          // Instead, it uses the debug data from the project's "postinstall" script.
-          debugDataList.find(
-            ({ postinstallType }) =>
-              pmType === 'bun' && /^Project$/i.test(postinstallType),
-          ) ??
-          {},
-      )
-      .catch((error) => ({}));
-    await fs.appendFile(
-      GITHUB_STEP_SUMMARY,
-      [
-        '```js',
-        `// Files in ${binDir}`,
-        ...insertHeader(
-          '// This path can also be got using environment variables:',
-          filepathUsingEnvNameList(binDir, debugData.env, installEnv).map(
-            ({ path }) => path,
+  /**
+   * @type {Record<string, {
+   *   setup: (options: { pkgJson: Record<string, unknown> }) => Promise<{ expectedLocalPrefix: string }>
+   * }>}
+   */
+  const localInstallCases = {
+    'Same location as `package.json`': {
+      async setup() {
+        return {
+          expectedLocalPrefix: process.cwd(),
+        };
+      },
+    },
+    'In a subdirectory of the directory where the `package.json` is located': {
+      async setup() {
+        const expectedLocalPrefix = process.cwd();
+
+        const newCWD = path.resolve('sub-dir/foo/bar');
+        await fs.mkdir(newCWD, { recursive: true });
+        process.chdir(newCWD);
+
+        return {
+          expectedLocalPrefix,
+        };
+      },
+    },
+  };
+
+  const origCWD = process.cwd();
+  for (const [caseName, { setup }] of Object.entries(localInstallCases)) {
+    const { expectedLocalPrefix, localInstallEnv } = await core.group(
+      `Setup (${caseName})`,
+      async () => {
+        process.chdir(await fs.mkdtemp(origCWD + path.sep));
+
+        const pkgJsonPath = path.resolve('package.json');
+        const pkgJson = {
+          scripts: {
+            postinstall: `node "${path.relative(
+              '.',
+              postinstallFullpath,
+            )}" --type="Project (${caseName})"`,
+          },
+        };
+        if (isYarnBerry) {
+          await fs.writeFile('yarn.lock', new Uint8Array(0));
+          // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
+          await fs.writeFile('.yarnrc.yml', 'enableImmutableInstalls: false');
+        }
+
+        const { expectedLocalPrefix } = await setup({ pkgJson });
+        await fs.writeFile(pkgJsonPath, JSON.stringify(pkgJson));
+
+        const localInstallEnv = Object.assign({}, installEnv, {
+          POSTINSTALL_TYPE: `Local Dependencies (${caseName})`,
+          DEBUG_EXPECTED_LOCAL_PREFIX: expectedLocalPrefix,
+        });
+        await fs.writeFile(
+          localInstallEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
+          JSON.stringify(localInstallEnv, (_, value) =>
+            value === undefined ? null : value,
           ),
-          '//     ',
-        ),
-        inspect(await fs.readdir(binDir).catch((error) => error)),
-        '```',
-        '',
-        '',
-      ].join('\n'),
+        );
+        await fs.writeFile(
+          localInstallEnv.DEBUG_DATA_JSON_LINES_PATH,
+          new Uint8Array(0),
+        );
+
+        return { expectedLocalPrefix, localInstallEnv };
+      },
+    );
+
+    if (pmType === 'npm') {
+      await exec.exec('npm install', [tarballFullpath], {
+        env: localInstallEnv,
+      });
+    } else if (pmType === 'yarn') {
+      if (packageManager.startsWith('yarn@1.')) {
+        await exec.exec('yarn add', [tarballFullpath], {
+          env: localInstallEnv,
+        });
+      } else {
+        await exec.exec(
+          'yarn add',
+          [yarnBerryAcceptsFullpath(tarballFullpath)],
+          {
+            env: localInstallEnv,
+          },
+        );
+      }
+    } else if (pmType === 'pnpm') {
+      await exec.exec('pnpm add', [tarballFullpath], { env: localInstallEnv });
+    } else if (pmType === 'bun') {
+      await exec.exec('bun add', [tarballFullpath], { env: localInstallEnv });
+    }
+
+    await core.group(
+      `Add a list of installed executables to the Job Summary (${caseName})`,
+      async () => {
+        const binDir = path.resolve(expectedLocalPrefix, 'node_modules/.bin');
+        const debugData = await fs
+          .readFile(localInstallEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
+          .then(parseJsonLines)
+          .then(
+            (debugDataList) =>
+              debugDataList.find(
+                ({ postinstallType }) =>
+                  postinstallType === localInstallEnv.POSTINSTALL_TYPE,
+              ) ??
+              // Bun does not execute the "postinstall" script of installed dependencies.
+              // Instead, it uses the debug data from the project's "postinstall" script.
+              debugDataList.find(
+                ({ postinstallType }) =>
+                  pmType === 'bun' && /^Project\b/i.test(postinstallType),
+              ) ??
+              {},
+          )
+          .catch(() => ({}));
+        await fs.appendFile(
+          localInstallEnv.GITHUB_STEP_SUMMARY,
+          [
+            '```js',
+            `// Files in ${binDir}`,
+            ...insertHeader(
+              '// This path can also be got using environment variables:',
+              filepathUsingEnvNameList(
+                binDir,
+                debugData.env,
+                localInstallEnv,
+              ).map(({ path }) => path),
+              '//     ',
+            ),
+            inspect(await fs.readdir(binDir).catch((error) => error)),
+            '```',
+            '',
+            '',
+          ].join('\n'),
+        );
+      },
     );
   }
+  process.chdir(origCWD);
 
   installEnv.POSTINSTALL_TYPE = 'Global Dependencies';
-  installEnv.DEBUG_EXPECTED_LOCAL_PREFIX = undefined;
   await fs.writeFile(
     installEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
     JSON.stringify(installEnv, (_, value) =>
