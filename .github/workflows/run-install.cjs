@@ -6,15 +6,8 @@
  * @param {import('@actions/exec')} args.exec
  * @param {typeof require} args.require
  * @param {string} args.packageManager
- * @param {string} args.workspaceDirname
  */
-module.exports = async ({
-  core,
-  exec,
-  require,
-  packageManager,
-  workspaceDirname,
-}) => {
+module.exports = async ({ core, exec, require, packageManager }) => {
   const fs = require('fs/promises');
   const os = require('os');
   const path = require('path');
@@ -145,8 +138,7 @@ module.exports = async ({
     },
   );
 
-  const workspaceRootpath = path.resolve(workspaceDirname);
-  const postinstallFullpath = path.resolve(workspaceRootpath, 'postinstall.js');
+  const postinstallFullpath = path.resolve('postinstall.js');
 
   const defaultEnv = Object.fromEntries(
     Object.entries(process.env).filter(

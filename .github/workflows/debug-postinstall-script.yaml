@@ -16,12 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       repo-dirname: repo
-      workspace-dirname: path/to/foo/bar
       artifact-name: debug-package@${{ github.event.number && format('pr-{0}', github.event.number) || github.sha }}
       archive-filename: debug-package.tar.zst
       tarball-name: foo.tgz
     outputs:
-      workspace-dirname: ${{ env.workspace-dirname }}
       artifact-name: ${{ env.artifact-name }}
       archive-filename: ${{ env.archive-filename }}
       tarball-name: ${{ env.tarball-name }}
@@ -35,7 +33,6 @@ jobs:
         run: |
           readonly root_path="$PWD"
           readonly debugger_package_path="${root_path}"'/${{ env.repo-dirname }}/postinstall-debug-package'
-          readonly workspace_path="${root_path}"'/${{ env.workspace-dirname }}'
 
           (
             cd "${debugger_package_path}" && {
@@ -44,15 +41,8 @@ jobs:
             }
           )
 
-          cp -r "${root_path}"'/${{ env.repo-dirname }}/.github' ./
-
-          mkdir -p "${workspace_path}"
-          {
-            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project"'
-          } > "${workspace_path}/package.json"
-          touch "${workspace_path}/yarn.lock"
-          cp "${debugger_package_path}/postinstall.js" "${workspace_path}"
-
+          cp -r "${root_path}"'/${{ env.repo-dirname }}/.github' "${root_path}"
+          cp "${debugger_package_path}/postinstall.js" "${root_path}"
           echo '{}' > "${root_path}/package.json"
 
           find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
@@ -165,7 +155,6 @@ jobs:
               require,
               __original_require__,
               packageManager: '${{ matrix.package-manager }}',
-              workspaceDirname: '${{ needs.setup.outputs.workspace-dirname }}',
             });
 
   # Successfully complete this job when all jobs have been completed.
