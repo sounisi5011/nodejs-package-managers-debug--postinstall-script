@@ -213,7 +213,8 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   };
   /**
    * @type {Record<string, {
-   *   setup: (options: { pkgJson: Record<string, unknown> }) => Promise<{ expectedLocalPrefix: string } | null>
+   *   setup: (options: { pkgJson: Record<string, unknown> }) => Promise<{ expectedLocalPrefix: string } | null>,
+   *   isWorkspacesProjectRoot?: true,
    * }>}
    */
   const localInstallCases = {
@@ -233,6 +234,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
             expectedLocalPrefix: projectRootPath,
           };
         },
+        isWorkspacesProjectRoot: true,
       },
     '`package.json` exists in the same directory, which is the package directory of workspaces':
       {
@@ -276,6 +278,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
             expectedLocalPrefix: projectRootPath,
           };
         },
+        isWorkspacesProjectRoot: true,
       },
     '`package.json` exists in the ancestor directory, which is the package directory of workspaces':
       {
@@ -296,7 +299,9 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   };
 
   const origCWD = process.cwd();
-  for (const [caseName, { setup }] of Object.entries(localInstallCases)) {
+  for (const [caseName, { setup, isWorkspacesProjectRoot }] of Object.entries(
+    localInstallCases,
+  )) {
     const setupResult = await core.group(`Setup (${caseName})`, async () => {
       process.chdir(await fs.mkdtemp(origCWD + path.sep));
 
@@ -351,9 +356,13 @@ module.exports = async ({ core, exec, require, packageManager }) => {
       });
     } else if (pmType === 'yarn') {
       if (packageManager.startsWith('yarn@1.')) {
-        await exec.exec('yarn add', [tarballFullpath], {
-          env: localInstallEnv,
-        });
+        await exec.exec(
+          'yarn add',
+          isWorkspacesProjectRoot
+            ? [tarballFullpath, '--ignore-workspace-root-check']
+            : [tarballFullpath],
+          { env: localInstallEnv },
+        );
       } else {
         await exec.exec(
           'yarn add',
@@ -364,7 +373,13 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         );
       }
     } else if (pmType === 'pnpm') {
-      await exec.exec('pnpm add', [tarballFullpath], { env: localInstallEnv });
+      await exec.exec(
+        'pnpm add',
+        isWorkspacesProjectRoot
+          ? ['--workspace-root', tarballFullpath]
+          : [tarballFullpath],
+        { env: localInstallEnv },
+      );
     } else if (pmType === 'bun') {
       await exec.exec('bun add', [tarballFullpath], { env: localInstallEnv });
     }
