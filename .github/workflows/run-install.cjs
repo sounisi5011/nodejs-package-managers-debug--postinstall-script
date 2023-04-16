@@ -207,6 +207,8 @@ module.exports = async ({ core, exec, require, packageManager }) => {
       JSON.stringify({
         // If using Bun, a "name" field is required in "package.json"
         name: 'fuga',
+        // If using Yarn v1, a "name" field is required in "package.json"
+        version: '0.0.0',
       }),
     );
     return { packageDirpath };
