@@ -204,7 +204,10 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     await fs.mkdir(packageDirpath, { recursive: true });
     await fs.writeFile(
       path.join(packageDirpath, 'package.json'),
-      JSON.stringify({}),
+      JSON.stringify({
+        // If using Bun, a "name" field is required in "package.json"
+        name: 'fuga',
+      }),
     );
     return { packageDirpath };
   };
