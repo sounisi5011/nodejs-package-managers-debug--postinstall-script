@@ -5,7 +5,6 @@
     "fmt": "prettier --write '**/*'"
   },
   "dependencies": {
-    "chokidar": "3.5.3",
     "used-pm": "1.0.0"
   },
   "devDependencies": {

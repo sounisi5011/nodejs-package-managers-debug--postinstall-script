@@ -1,7 +1,5 @@
 // @ts-check
 
-const chokidar = require('chokidar');
-
 /**
  * @param {object} args
  * @param {import('@actions/core')} args.core
@@ -327,7 +325,6 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   )) {
     const setupResult = await core.group(`Setup (${caseName})`, async () => {
       process.chdir(await fs.mkdtemp(origCWD + path.sep));
-      const projectRootPath = process.cwd();
 
       const pkgJsonPath = path.resolve('package.json');
       const shellQuotChar = process.platform === 'win32' ? `"` : `'`;
@@ -369,28 +366,11 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         new Uint8Array(0),
       );
 
-      return { projectRootPath, expectedLocalPrefix, localInstallEnv };
+      return { expectedLocalPrefix, localInstallEnv };
     });
     if (!setupResult) continue;
-    const { projectRootPath, expectedLocalPrefix, localInstallEnv } =
-      setupResult;
+    const { expectedLocalPrefix, localInstallEnv } = setupResult;
 
-    /** @type {Set<string>} */
-    const addedFiles = new Set();
-    const watcher = chokidar
-      .watch(projectRootPath, {
-        ignoreInitial: true,
-        followSymlinks: false,
-        disableGlobbing: true,
-        ignorePermissionErrors: true,
-      })
-      .on('add', (filename) => {
-        addedFiles.add(filename);
-      })
-      .on('error', (error) => {
-        throw error;
-      });
-    await new Promise((resolve) => watcher.on('ready', resolve));
     if (pmType === 'npm') {
       await exec.exec('npm install', [tarballFullpath], {
         env: localInstallEnv,
@@ -424,7 +404,6 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     } else if (pmType === 'bun') {
       await exec.exec('bun add', [tarballFullpath], { env: localInstallEnv });
     }
-    await watcher.close();
 
     await core.group(
       `Add a list of installed executables to the Job Summary (${caseName})`,
@@ -452,28 +431,6 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         await fs.appendFile(
           localInstallEnv.GITHUB_STEP_SUMMARY,
           [
-            `<details>`,
-            '<summary>Added files</summary>',
-            '',
-            '```',
-            ...(
-              await Promise.all(
-                [...addedFiles.values()].map(async (addedFilepath) => {
-                  const isFile = await fs
-                    .stat(addedFilepath)
-                    .then((stats) => stats.isFile())
-                    .catch((error) => {
-                      if (error.code === 'ENOENT') return false;
-                      throw error;
-                    });
-                  return isFile ? addedFilepath : [];
-                }),
-              )
-            ).flat(),
-            '```',
-            '',
-            '</details>',
-            '',
             '```js',
             `// Files in ${binDir}`,
             ...insertHeader(
