@@ -1,5 +1,15 @@
 lockfileVersion: '6.0'
 
+patchedDependencies:
+  used-pm@1.0.0:
+    hash: vagrn54hxsys32i3eqkpm4xpyq
+    path: patches/used-pm@1.0.0.patch
+
+dependencies:
+  used-pm:
+    specifier: 1.0.0
+    version: 1.0.0(patch_hash=vagrn54hxsys32i3eqkpm4xpyq)
+
 devDependencies:
   '@actions/core':
     specifier: 1.10.0
@@ -1611,6 +1621,11 @@ packages:
       punycode: 2.3.0
     dev: true
     optional: true
+
+  /used-pm@1.0.0(patch_hash=vagrn54hxsys32i3eqkpm4xpyq):
+    resolution: {integrity: sha512-imCruP1jKlraI8MgwRYg1gvduqYN1MKe8pfcdX34gx8LfO8JxhVTv6r7LtRvIWOBtamys3+7QEZTMb0ZccHXiQ==}
+    dev: false
+    patched: true
 
   /util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}

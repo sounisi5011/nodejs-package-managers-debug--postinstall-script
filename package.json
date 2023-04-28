@@ -4,6 +4,9 @@
     "build": "node ./build.mjs",
     "fmt": "prettier --write '**/*'"
   },
+  "dependencies": {
+    "used-pm": "1.0.0"
+  },
   "devDependencies": {
     "@actions/core": "1.10.0",
     "@actions/exec": "1.1.1",
@@ -15,5 +18,10 @@
     "prettier-package-json": "2.8.0",
     "sort-package-json": "2.4.1"
   },
-  "packageManager": "pnpm@8.2.0"
+  "packageManager": "pnpm@8.2.0",
+  "pnpm": {
+    "patchedDependencies": {
+      "used-pm@1.0.0": "patches/used-pm@1.0.0.patch"
+    }
+  }
 }
