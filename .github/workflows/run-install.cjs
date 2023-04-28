@@ -1,5 +1,7 @@
 // @ts-check
 
+const chokidar = require('chokidar');
+
 /**
  * @param {object} args
  * @param {import('@actions/core')} args.core
@@ -373,25 +375,25 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     const { projectRootPath, expectedLocalPrefix, localInstallEnv } =
       setupResult;
 
-    const ac = new AbortController();
     const watchEventList = [];
-    (async () => {
-      for await (const event of fs.watch(projectRootPath, {
-        recursive: true,
-        signal: ac.signal,
-      })) {
-        watchEventList.push(
-          typeof event.filename === 'string'
-            ? Object.assign(event, {
-                fullpath: path.join(projectRootPath, event.filename),
-              })
-            : event,
-        );
-      }
-    })().catch((error) => {
-      if (error.name === 'AbortError') return;
-      throw error;
-    });
+    const watcher = chokidar
+      .watch(projectRootPath, {
+        ignoreInitial: true,
+        followSymlinks: false,
+        disableGlobbing: true,
+        ignorePermissionErrors: true,
+      })
+      .on('all', (eventName, filename) => {
+        watchEventList.push({
+          eventName,
+          filename,
+          fullpath: path.join(projectRootPath, filename),
+        });
+      })
+      .on('error', (error) => {
+        throw error;
+      });
+    await new Promise((resolve) => watcher.on('ready', resolve));
     if (pmType === 'npm') {
       await exec.exec('npm install', [tarballFullpath], {
         env: localInstallEnv,
@@ -425,7 +427,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     } else if (pmType === 'bun') {
       await exec.exec('bun add', [tarballFullpath], { env: localInstallEnv });
     }
-    ac.abort();
+    await watcher.close();
 
     await core.group(
       `Add a list of installed executables to the Job Summary (${caseName})`,
