@@ -1,5 +1,9 @@
 // @ts-check
 
+const chokidar = require('chokidar');
+
+const BIN_NAME = 'bar';
+
 /**
  * @param {object} args
  * @param {import('@actions/core')} args.core
@@ -104,6 +108,84 @@ module.exports = async ({ core, exec, require, packageManager }) => {
       absolutePath = absolutePath.replace(/(?:^[A-Z]:)?\\/gi, '/');
     }
     return absolutePath;
+  }
+
+  /**
+   * @template T
+   * @param {object} args
+   * @param {string} args.rootDirpath
+   * @param {string} args.binName
+   * @param {boolean} [args.isGlobal]
+   * @param {() => Promise<T>} installFn
+   * @returns {Promise<{ result: T, executablesFilepathList: string[] }>}
+   */
+  async function watchNpmExecutables(
+    { rootDirpath, binName, isGlobal = false },
+    installFn,
+  ) {
+    /** @type {Set<string>} */
+    const actualExecutablesFilepathSet = new Set();
+    /** @type {Error | undefined} */
+    let watchError;
+    const watcher = chokidar
+      .watch(path.resolve(rootDirpath), {
+        ignoreInitial: true,
+        followSymlinks: false,
+        disableGlobbing: true,
+        ignorePermissionErrors: true,
+      })
+      .on('add', (filepath) => {
+        const dirpath = path.dirname(filepath);
+        const filename = path.basename(filepath);
+        const isValidDir =
+          isGlobal ||
+          (path.basename(path.dirname(dirpath)) === 'node_modules' &&
+            path.basename(dirpath) === '.bin');
+        if (
+          isValidDir &&
+          (filename === binName || filename.startsWith(`${binName}.`))
+        ) {
+          actualExecutablesFilepathSet.add(filepath);
+        }
+      })
+      .on('error', (err) => {
+        watchError = err;
+      });
+    await new Promise((resolve, reject) =>
+      watcher
+        .on('ready', resolve)
+        .on('error', (error) => watcher.close().finally(() => reject(error))),
+    );
+
+    const { result } = await installFn()
+      .then(async (result) => {
+        await watcher.close().finally(() => {
+          if (watchError) throw watchError;
+        });
+        return { result };
+      })
+      .catch(async (error) => {
+        await watcher.close().catch(() => {});
+        throw error;
+      });
+
+    await Promise.all(
+      [...actualExecutablesFilepathSet.values()].map(async (filepath) => {
+        const isFile = await fs
+          .stat(filepath)
+          .then((stats) => stats.isFile())
+          .catch((error) => {
+            if (error.code === 'ENOENT') return false;
+            throw error;
+          });
+        if (!isFile) actualExecutablesFilepathSet.delete(filepath);
+      }),
+    );
+
+    return {
+      result,
+      executablesFilepathList: [...actualExecutablesFilepathSet],
+    };
   }
 
   const tarballFullpath = await core.group(
@@ -325,6 +407,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   )) {
     const setupResult = await core.group(`Setup (${caseName})`, async () => {
       process.chdir(await fs.mkdtemp(origCWD + path.sep));
+      const projectRootPath = process.cwd();
 
       const pkgJsonPath = path.resolve('package.json');
       const shellQuotChar = process.platform === 'win32' ? `"` : `'`;
@@ -366,49 +449,59 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         new Uint8Array(0),
       );
 
-      return { expectedLocalPrefix, localInstallEnv };
+      return { projectRootPath, localInstallEnv };
     });
     if (!setupResult) continue;
-    const { expectedLocalPrefix, localInstallEnv } = setupResult;
+    const { projectRootPath, localInstallEnv } = setupResult;
 
-    if (pmType === 'npm') {
-      await exec.exec('npm install', [tarballFullpath], {
-        env: localInstallEnv,
-      });
-    } else if (pmType === 'yarn') {
-      if (packageManager.startsWith('yarn@1.')) {
-        await exec.exec(
-          'yarn add',
-          isWorkspacesProjectRoot
-            ? [tarballFullpath, '--ignore-workspace-root-check']
-            : [tarballFullpath],
-          { env: localInstallEnv },
-        );
-      } else {
-        await exec.exec(
-          'yarn add',
-          [yarnBerryAcceptsFullpath(tarballFullpath)],
-          {
-            env: localInstallEnv,
-          },
-        );
-      }
-    } else if (pmType === 'pnpm') {
-      await exec.exec(
-        'pnpm add',
-        isWorkspacesProjectRoot
-          ? ['--workspace-root', tarballFullpath]
-          : [tarballFullpath],
-        { env: localInstallEnv },
+    const { executablesFilepathList: installedExecutables } =
+      await watchNpmExecutables(
+        { rootDirpath: projectRootPath, binName: BIN_NAME },
+        async () => {
+          if (pmType === 'npm') {
+            await exec.exec('npm install', [tarballFullpath], {
+              env: localInstallEnv,
+            });
+          } else if (pmType === 'yarn') {
+            if (packageManager.startsWith('yarn@1.')) {
+              await exec.exec(
+                'yarn add',
+                isWorkspacesProjectRoot
+                  ? [tarballFullpath, '--ignore-workspace-root-check']
+                  : [tarballFullpath],
+                { env: localInstallEnv },
+              );
+            } else {
+              await exec.exec(
+                'yarn add',
+                [yarnBerryAcceptsFullpath(tarballFullpath)],
+                {
+                  env: localInstallEnv,
+                },
+              );
+            }
+          } else if (pmType === 'pnpm') {
+            await exec.exec(
+              'pnpm add',
+              isWorkspacesProjectRoot
+                ? ['--workspace-root', tarballFullpath]
+                : [tarballFullpath],
+              { env: localInstallEnv },
+            );
+          } else if (pmType === 'bun') {
+            await exec.exec('bun add', [tarballFullpath], {
+              env: localInstallEnv,
+            });
+          }
+        },
       );
-    } else if (pmType === 'bun') {
-      await exec.exec('bun add', [tarballFullpath], { env: localInstallEnv });
-    }
 
     await core.group(
       `Add a list of installed executables to the Job Summary (${caseName})`,
       async () => {
-        const binDir = path.resolve(expectedLocalPrefix, 'node_modules/.bin');
+        const binDirSet = new Set(
+          installedExecutables.map((filepath) => path.dirname(filepath)),
+        );
         const debugData = await fs
           .readFile(localInstallEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
           .then(parseJsonLines)
@@ -432,21 +525,27 @@ module.exports = async ({ core, exec, require, packageManager }) => {
           localInstallEnv.GITHUB_STEP_SUMMARY,
           [
             '```js',
-            `// Files in ${binDir}`,
-            ...insertHeader(
-              '// This path can also be got using environment variables:',
-              filepathUsingEnvNameList(
-                binDir,
-                debugData.env,
-                localInstallEnv,
-              ).map(({ path }) => path),
-              '//     ',
+            await Promise.all(
+              [...binDirSet].map(async (binDir) => [
+                `// Files in ${binDir}`,
+                ...insertHeader(
+                  '// This path can also be got using environment variables:',
+                  filepathUsingEnvNameList(
+                    binDir,
+                    debugData.env,
+                    localInstallEnv,
+                  ).map(({ path }) => path),
+                  '//     ',
+                ),
+                inspect(await fs.readdir(binDir).catch((error) => error)),
+              ]),
             ),
-            inspect(await fs.readdir(binDir).catch((error) => error)),
             '```',
             '',
             '',
-          ].join('\n'),
+          ]
+            .flat(2)
+            .join('\n'),
         );
       },
     );
@@ -473,7 +572,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
       // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
       await exec.exec(
         'yarn dlx --package',
-        [yarnBerryAcceptsFullpath(tarballFullpath), 'bar'],
+        [yarnBerryAcceptsFullpath(tarballFullpath), BIN_NAME],
         { env: installEnv },
       );
     }
