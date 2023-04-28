@@ -171,6 +171,10 @@ module.exports = async ({ core, exec, require, packageManager }) => {
 
     const cwd = process.cwd();
     const packageDir = 'packages/hoge';
+    const origPostinstallScript =
+      typeof pkgJson.scripts?.['postinstall'] === 'string'
+        ? pkgJson.scripts['postinstall']
+        : undefined;
     if (pmType === 'npm' || pmType === 'yarn' || pmType === 'bun') {
       // see https://docs.npmjs.com/cli/v7/using-npm/workspaces
       // see https://github.com/npm/cli/blob/v7.0.1/docs/content/using-npm/workspaces.md
@@ -199,6 +203,13 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         JSON.stringify({ packages: [packageDir] }),
       );
     }
+    pkgJson.scripts = {
+      ...(typeof pkgJson.scripts === 'object' ? pkgJson.scripts : {}),
+      postinstall: origPostinstallScript?.replace(
+        /(?<=['"])Project(?= Root)/,
+        'Workspaces',
+      ),
+    };
 
     const packageDirpath = path.join(cwd, packageDir);
     await fs.mkdir(packageDirpath, { recursive: true });
@@ -209,6 +220,14 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         name: 'fuga',
         // If using Yarn v1, a "name" field is required in "package.json"
         version: '0.0.0',
+        scripts: {
+          postinstall: origPostinstallScript
+            ?.replace(
+              /(?<= )\.\/(?=postinstall\.js(?: |$))/,
+              `${path.relative(packageDirpath, cwd)}/`.replace(/\\/g, '/'),
+            )
+            .replace(/(?<=['"])Project(?= Root)/, 'Package'),
+        },
       }),
     );
     return { packageDirpath };
@@ -311,7 +330,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
       const shellQuotChar = process.platform === 'win32' ? `"` : `'`;
       const pkgJson = {
         scripts: {
-          postinstall: `node ./postinstall.js --type=${shellQuotChar}Project (${caseName})${shellQuotChar}`,
+          postinstall: `node ./postinstall.js --type=${shellQuotChar}Project Root (${caseName})${shellQuotChar}`,
         },
       };
       await fs.copyFile(postinstallFullpath, './postinstall.js');
@@ -403,7 +422,8 @@ module.exports = async ({ core, exec, require, packageManager }) => {
               // Instead, it uses the debug data from the project's "postinstall" script.
               debugDataList.find(
                 ({ postinstallType }) =>
-                  pmType === 'bun' && /^Project\b/i.test(postinstallType),
+                  pmType === 'bun' &&
+                  /^(?:Project|Package)\b/i.test(postinstallType),
               ) ??
               {},
           )
