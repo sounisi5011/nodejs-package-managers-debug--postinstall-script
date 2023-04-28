@@ -75,7 +75,7 @@ jobs:
             }
           )
 
-          cp -r "${repo_path}"/.github' "${root_path}"
+          cp -r "${repo_path}"'/.github' "${root_path}"
           cp "${debugger_package_path}/postinstall.js" "${root_path}"
           echo '{}' > "${root_path}/package.json"
 
