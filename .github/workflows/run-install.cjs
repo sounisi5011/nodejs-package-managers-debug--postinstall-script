@@ -499,6 +499,18 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     await core.group(
       `Add a list of installed executables to the Job Summary (${caseName})`,
       async () => {
+        if (installedExecutables.length < 1) {
+          await fs.appendFile(
+            localInstallEnv.GITHUB_STEP_SUMMARY,
+            [
+              '*No executables created in `node_modules/.bin` directory.*',
+              '',
+              '',
+            ].join('\n'),
+          );
+          return;
+        }
+
         const binDirSet = new Set(
           installedExecutables.map((filepath) => path.dirname(filepath)),
         );
