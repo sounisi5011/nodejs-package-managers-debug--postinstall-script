@@ -32,17 +32,18 @@ jobs:
         shell: bash
         run: |
           readonly root_path="$PWD"
+          readonly debugger_package_path="${root_path}"'/${{ env.repo-dirname }}/postinstall-debug-package'
+
           (
-            cd './${{ env.repo-dirname }}/postinstall-debug-package/' && {
-              cp ./postinstall.js "${root_path}/"
+            cd "${debugger_package_path}" && {
               npm pack
               mv ./*.tgz "${root_path}/${{ env.tarball-name }}"
             }
           )
-          cp -r './${{ env.repo-dirname }}/.github' ./
-          {
-            echo '{}' | jq '.scripts.postinstall = "node ./postinstall.js --type=Project"'
-          } > ./package.json
+
+          cp -r "${root_path}"'/${{ env.repo-dirname }}/.github' "${root_path}"
+          cp "${debugger_package_path}/postinstall.js" "${root_path}"
+          echo '{}' > "${root_path}/package.json"
 
           find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
             | xargs -0 tar -c --file './${{ env.archive-filename }}' --zstd --verbose

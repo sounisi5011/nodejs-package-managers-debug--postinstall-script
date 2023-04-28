@@ -97,6 +97,14 @@ module.exports = async ({ core, exec, require, packageManager }) => {
       return [];
     });
   }
+  function yarnBerryAcceptsFullpath(absolutePath) {
+    absolutePath = path.resolve(absolutePath);
+    if (process.platform === 'win32') {
+      // Remove Windows drive letter and replace path separator with slash
+      absolutePath = absolutePath.replace(/(?:^[A-Z]:)?\\/gi, '/');
+    }
+    return absolutePath;
+  }
 
   const tarballFullpath = await core.group(
     'Move debugger package tarball',
@@ -130,6 +138,8 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     },
   );
 
+  const postinstallFullpath = path.resolve('postinstall.js');
+
   const defaultEnv = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key]) =>
@@ -145,110 +155,327 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     await exec.exec(pmType, ['--version'], { env: defaultEnv });
   });
 
-  if (pmType === 'yarn' && !packageManager.startsWith('yarn@1.')) {
-    // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
-    await core.group('Setup', async () => {
-      await exec.exec('yarn config set enableImmutableInstalls false', [], {
-        env: defaultEnv,
-      });
-    });
-  }
-
-  const tarballPath = path.relative(process.cwd(), tarballFullpath);
+  const isYarnBerry =
+    pmType === 'yarn' && !packageManager.startsWith('yarn@1.');
   const tmpDirpath = await fs.mkdtemp(os.tmpdir() + path.sep);
-  const expectedLocalPrefix = process.cwd();
   const installEnv = {
     ...defaultEnv,
-    POSTINSTALL_TYPE: 'Local Dependencies',
     DEBUG_DATA_JSON_LINES_PATH: path.join(tmpDirpath, 'debug-data.jsonl'),
     DEBUG_ORIGINAL_ENV_JSON_PATH: path.join(tmpDirpath, 'orig-env.json'),
-    DEBUG_EXPECTED_LOCAL_PREFIX: expectedLocalPrefix,
   };
-  await fs.writeFile(
-    installEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
-    JSON.stringify(installEnv, (_, value) =>
-      value === undefined ? null : value,
-    ),
-  );
-  if (pmType === 'npm') {
-    await exec.exec('npm install', [tarballPath], { env: installEnv });
-  } else if (pmType === 'yarn') {
-    if (packageManager.startsWith('yarn@1.')) {
-      await exec.exec('yarn add', [tarballPath], { env: installEnv });
-    } else {
-      await exec.exec('yarn add', [tarballPath.replaceAll(path.sep, '/')], {
-        env: installEnv,
-      });
-    }
-  } else if (pmType === 'pnpm') {
-    await exec.exec('pnpm add', [tarballPath], { env: installEnv });
-  } else if (pmType === 'bun') {
-    await exec.exec('bun add', [tarballPath], { env: installEnv });
-  }
-  {
-    const { GITHUB_STEP_SUMMARY } = defaultEnv;
-    const binDir = path.resolve(expectedLocalPrefix, 'node_modules/.bin');
-    const debugData = await fs
-      .readFile(installEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
-      .then(parseJsonLines)
-      .then(
-        (debugDataList) =>
-          debugDataList.find(
-            ({ postinstallType }) =>
-              postinstallType === installEnv.POSTINSTALL_TYPE,
-          ) ??
-          // Bun does not execute the "postinstall" script of installed dependencies.
-          // Instead, it uses the debug data from the project's "postinstall" script.
-          debugDataList.find(
-            ({ postinstallType }) =>
-              pmType === 'bun' && /^Project$/i.test(postinstallType),
-          ) ??
-          {},
-      )
-      .catch((error) => ({}));
-    await fs.appendFile(
-      GITHUB_STEP_SUMMARY,
-      [
-        '```js',
-        `// Files in ${binDir}`,
-        ...insertHeader(
-          '// This path can also be got using environment variables:',
-          filepathUsingEnvNameList(binDir, debugData.env, installEnv).map(
-            ({ path }) => path,
-          ),
-          '//     ',
-        ),
-        inspect(await fs.readdir(binDir).catch((error) => error)),
-        '```',
-        '',
-        '',
-      ].join('\n'),
-    );
-  }
+  /**
+   * @type {(options: { pkgJson: Record<string, unknown> }) => Promise<{ packageDirpath: string } | null>}
+   */
+  const setupWorkspaces = async ({ pkgJson }) => {
+    if (/^npm@[0-6]\./.test(packageManager)) return null;
 
-  installEnv.POSTINSTALL_TYPE = 'Global Dependencies';
-  installEnv.DEBUG_EXPECTED_LOCAL_PREFIX = undefined;
-  await fs.writeFile(
-    installEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
-    JSON.stringify(installEnv, (_, value) =>
-      value === undefined ? null : value,
-    ),
-  );
-  if (pmType === 'npm') {
-    await exec.exec('npm install --global', [tarballPath], { env: installEnv });
-  } else if (pmType === 'yarn') {
-    if (packageManager.startsWith('yarn@1.')) {
-      await exec.exec('yarn global add', [tarballPath], { env: installEnv });
-    } else {
-      // Note: On Windows, the "yarn dlx --package" command does not know the local filepath
-      // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
-      if (process.platform !== 'win32') {
+    const cwd = process.cwd();
+    const packageDir = 'packages/hoge';
+    const origPostinstallScript =
+      typeof pkgJson.scripts?.['postinstall'] === 'string'
+        ? pkgJson.scripts['postinstall']
+        : undefined;
+    if (pmType === 'npm' || pmType === 'yarn' || pmType === 'bun') {
+      // see https://docs.npmjs.com/cli/v7/using-npm/workspaces
+      // see https://github.com/npm/cli/blob/v7.0.1/docs/content/using-npm/workspaces.md
+      // see https://classic.yarnpkg.com/en/docs/workspaces
+      // see https://github.com/yarnpkg/website/blob/fb0d63c2a3c960edf1989d7efb970c420feb63b0/lang/en/docs/workspaces.md
+      // see https://yarnpkg.com/features/workspaces
+      // see https://github.com/yarnpkg/berry/blob/%40yarnpkg/cli/2.1.0/packages/gatsby/content/features/workspaces.md
+      // see https://github.com/yarnpkg/berry/blob/%40yarnpkg/cli/3.0.0/packages/gatsby/content/features/workspaces.md
+      // see https://github.com/yarnpkg/berry/blob/%40yarnpkg/cli/4.0.0-rc.42/packages/gatsby/content/features/workspaces.md
+      // see https://bun.sh/docs/install/workspaces
+      // see https://github.com/oven-sh/bun/blob/bun-v0.5.7/docs/cli/install.md#workspaces
+      // see https://github.com/oven-sh/bun/blob/bun-v0.5.9/docs/cli/install.md#workspaces
+      // see https://github.com/oven-sh/bun/blob/2dc3f4e0306518b16eb0bd9a505f9bc12963ec4d/docs/install/workspaces.md
+
+      // In Yarn v1, the "private" field is required
+      pkgJson.private = true;
+      pkgJson.workspaces = [
+        // glob syntax is supported as of Bun v0.5.8; it is not available in Bun v0.5.7 or lower.
+        packageDir,
+      ];
+    } else if (pmType === 'pnpm') {
+      // see https://pnpm.io/workspaces
+      // see https://github.com/pnpm/pnpm.github.io/blob/ca887546015ee833a04ded6b7e491afb26f6fbb2/docs/workspaces.md
+      await fs.writeFile(
+        path.join(cwd, 'pnpm-workspace.yaml'),
+        JSON.stringify({ packages: [packageDir] }),
+      );
+    }
+    pkgJson.scripts = {
+      ...(typeof pkgJson.scripts === 'object' ? pkgJson.scripts : {}),
+      postinstall: origPostinstallScript?.replace(
+        /(?<=['"])Project(?= Root)/,
+        'Workspaces',
+      ),
+    };
+
+    const packageDirpath = path.join(cwd, packageDir);
+    await fs.mkdir(packageDirpath, { recursive: true });
+    await fs.writeFile(
+      path.join(packageDirpath, 'package.json'),
+      JSON.stringify({
+        // If using Bun, a "name" field is required in "package.json"
+        name: 'fuga',
+        // If using Yarn v1, a "name" field is required in "package.json"
+        version: '0.0.0',
+        scripts: {
+          postinstall: origPostinstallScript
+            ?.replace(
+              /(?<= )\.\/(?=postinstall\.js(?: |$))/,
+              `${path.relative(packageDirpath, cwd)}/`.replace(/\\/g, '/'),
+            )
+            .replace(/(?<=['"])Project(?= Root)/, 'Package'),
+        },
+      }),
+    );
+    return { packageDirpath };
+  };
+  /**
+   * @type {Record<string, {
+   *   setup: (options: { pkgJson: Record<string, unknown> }) => Promise<{ expectedLocalPrefix: string } | null>,
+   *   isWorkspacesProjectRoot?: true,
+   * }>}
+   */
+  const localInstallCases = {
+    '`package.json` exists in the same directory': {
+      async setup() {
+        return {
+          expectedLocalPrefix: process.cwd(),
+        };
+      },
+    },
+    '`package.json` exists in the same directory, which is the project root of workspaces':
+      {
+        async setup({ pkgJson }) {
+          const projectRootPath = process.cwd();
+          if (!(await setupWorkspaces({ pkgJson }))) return null;
+          return {
+            expectedLocalPrefix: projectRootPath,
+          };
+        },
+        isWorkspacesProjectRoot: true,
+      },
+    '`package.json` exists in the same directory, which is the package directory of workspaces':
+      {
+        async setup({ pkgJson }) {
+          const result = await setupWorkspaces({ pkgJson });
+          if (!result) return null;
+
+          const { packageDirpath } = result;
+          process.chdir(packageDirpath);
+
+          return {
+            expectedLocalPrefix: packageDirpath,
+          };
+        },
+      },
+    '`package.json` exists in the ancestor directory': {
+      async setup() {
+        const expectedLocalPrefix = process.cwd();
+
+        const newCWD = path.resolve('sub-dir/foo/bar');
+        await fs.mkdir(newCWD, { recursive: true });
+        process.chdir(newCWD);
+
+        return {
+          expectedLocalPrefix,
+        };
+      },
+    },
+    '`package.json` exists in the ancestor directory, which is the project root of workspaces':
+      {
+        async setup({ pkgJson }) {
+          const projectRootPath = process.cwd();
+
+          if (!(await setupWorkspaces({ pkgJson }))) return null;
+
+          const newCWD = path.resolve(projectRootPath, 'sub-dir/baz/qux');
+          await fs.mkdir(newCWD, { recursive: true });
+          process.chdir(newCWD);
+
+          return {
+            expectedLocalPrefix: projectRootPath,
+          };
+        },
+        isWorkspacesProjectRoot: true,
+      },
+    '`package.json` exists in the ancestor directory, which is the package directory of workspaces':
+      {
+        async setup({ pkgJson }) {
+          const result = await setupWorkspaces({ pkgJson });
+          if (!result) return null;
+          const { packageDirpath } = result;
+
+          const newCWD = path.resolve(packageDirpath, 'sub-dir/quux/corge');
+          await fs.mkdir(newCWD, { recursive: true });
+          process.chdir(newCWD);
+
+          return {
+            expectedLocalPrefix: packageDirpath,
+          };
+        },
+      },
+  };
+
+  const origCWD = process.cwd();
+  for (const [caseName, { setup, isWorkspacesProjectRoot }] of Object.entries(
+    localInstallCases,
+  )) {
+    const setupResult = await core.group(`Setup (${caseName})`, async () => {
+      process.chdir(await fs.mkdtemp(origCWD + path.sep));
+
+      const pkgJsonPath = path.resolve('package.json');
+      const shellQuotChar = process.platform === 'win32' ? `"` : `'`;
+      const pkgJson = {
+        scripts: {
+          postinstall: `node ./postinstall.js --type=${shellQuotChar}Project Root (${caseName})${shellQuotChar}`,
+        },
+      };
+      await fs.copyFile(postinstallFullpath, './postinstall.js');
+      if (isYarnBerry) {
+        await fs.writeFile('yarn.lock', new Uint8Array(0));
+        // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
+        await fs.writeFile('.yarnrc.yml', 'enableImmutableInstalls: false');
+      }
+      if (pmType === 'pnpm') {
+        // pnpm v7 will not run the "postinstall" script if the dependency is already cached.
+        // Set side-effects-cache to "false" to always run the "postinstall" script.
+        // see https://github.com/pnpm/pnpm/issues/4649
+        await fs.writeFile('.npmrc', 'side-effects-cache = false');
+      }
+
+      const setupResult = await setup({ pkgJson });
+      if (!setupResult) return null;
+      const { expectedLocalPrefix } = setupResult;
+      await fs.writeFile(pkgJsonPath, JSON.stringify(pkgJson));
+
+      const localInstallEnv = Object.assign({}, installEnv, {
+        POSTINSTALL_TYPE: `Local Dependencies (${caseName})`,
+        DEBUG_EXPECTED_LOCAL_PREFIX: expectedLocalPrefix,
+      });
+      await fs.writeFile(
+        localInstallEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
+        JSON.stringify(localInstallEnv, (_, value) =>
+          value === undefined ? null : value,
+        ),
+      );
+      await fs.writeFile(
+        localInstallEnv.DEBUG_DATA_JSON_LINES_PATH,
+        new Uint8Array(0),
+      );
+
+      return { expectedLocalPrefix, localInstallEnv };
+    });
+    if (!setupResult) continue;
+    const { expectedLocalPrefix, localInstallEnv } = setupResult;
+
+    if (pmType === 'npm') {
+      await exec.exec('npm install', [tarballFullpath], {
+        env: localInstallEnv,
+      });
+    } else if (pmType === 'yarn') {
+      if (packageManager.startsWith('yarn@1.')) {
         await exec.exec(
-          'yarn dlx --package',
-          [path.resolve(tarballPath), 'bar'],
-          { env: installEnv },
+          'yarn add',
+          isWorkspacesProjectRoot
+            ? [tarballFullpath, '--ignore-workspace-root-check']
+            : [tarballFullpath],
+          { env: localInstallEnv },
+        );
+      } else {
+        await exec.exec(
+          'yarn add',
+          [yarnBerryAcceptsFullpath(tarballFullpath)],
+          {
+            env: localInstallEnv,
+          },
         );
       }
+    } else if (pmType === 'pnpm') {
+      await exec.exec(
+        'pnpm add',
+        isWorkspacesProjectRoot
+          ? ['--workspace-root', tarballFullpath]
+          : [tarballFullpath],
+        { env: localInstallEnv },
+      );
+    } else if (pmType === 'bun') {
+      await exec.exec('bun add', [tarballFullpath], { env: localInstallEnv });
+    }
+
+    await core.group(
+      `Add a list of installed executables to the Job Summary (${caseName})`,
+      async () => {
+        const binDir = path.resolve(expectedLocalPrefix, 'node_modules/.bin');
+        const debugData = await fs
+          .readFile(localInstallEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
+          .then(parseJsonLines)
+          .then(
+            (debugDataList) =>
+              debugDataList.find(
+                ({ postinstallType }) =>
+                  postinstallType === localInstallEnv.POSTINSTALL_TYPE,
+              ) ??
+              // Bun does not execute the "postinstall" script of installed dependencies.
+              // Instead, it uses the debug data from the project's "postinstall" script.
+              debugDataList.find(
+                ({ postinstallType }) =>
+                  pmType === 'bun' &&
+                  /^(?:Project|Package)\b/i.test(postinstallType),
+              ) ??
+              {},
+          )
+          .catch(() => ({}));
+        await fs.appendFile(
+          localInstallEnv.GITHUB_STEP_SUMMARY,
+          [
+            '```js',
+            `// Files in ${binDir}`,
+            ...insertHeader(
+              '// This path can also be got using environment variables:',
+              filepathUsingEnvNameList(
+                binDir,
+                debugData.env,
+                localInstallEnv,
+              ).map(({ path }) => path),
+              '//     ',
+            ),
+            inspect(await fs.readdir(binDir).catch((error) => error)),
+            '```',
+            '',
+            '',
+          ].join('\n'),
+        );
+      },
+    );
+  }
+  process.chdir(origCWD);
+
+  installEnv.POSTINSTALL_TYPE = 'Global Dependencies';
+  await fs.writeFile(
+    installEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
+    JSON.stringify(installEnv, (_, value) =>
+      value === undefined ? null : value,
+    ),
+  );
+  if (pmType === 'npm') {
+    await exec.exec('npm install --global', [tarballFullpath], {
+      env: installEnv,
+    });
+  } else if (pmType === 'yarn') {
+    if (packageManager.startsWith('yarn@1.')) {
+      await exec.exec('yarn global add', [tarballFullpath], {
+        env: installEnv,
+      });
+    } else {
+      // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
+      await exec.exec(
+        'yarn dlx --package',
+        [yarnBerryAcceptsFullpath(tarballFullpath), 'bar'],
+        { env: installEnv },
+      );
     }
   } else if (pmType === 'pnpm') {
     // The "pnpm add --global ..." command requires a global bin directory.
@@ -269,11 +496,9 @@ module.exports = async ({ core, exec, require, packageManager }) => {
       JSON.stringify(env, (_, value) => (value === undefined ? null : value)),
     );
 
-    await exec.exec('pnpm add --global', [path.resolve(tarballPath)], { env });
+    await exec.exec('pnpm add --global', [tarballFullpath], { env });
   } else if (pmType === 'bun') {
-    await exec.exec('bun add --global', [path.resolve(tarballPath)], {
-      env: installEnv,
-    });
+    await exec.exec('bun add --global', [tarballFullpath], { env: installEnv });
   }
   {
     const { GITHUB_STEP_SUMMARY } = defaultEnv;
