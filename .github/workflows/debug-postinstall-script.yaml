@@ -70,7 +70,7 @@ jobs:
 
           (
             cd "${debugger_package_path}" && {
-              npm pack
+              pnpm pack
               mv ./*.tgz "${root_path}/${{ env.tarball-name }}"
             }
           )
