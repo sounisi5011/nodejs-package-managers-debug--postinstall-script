@@ -377,9 +377,16 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     const watchEventList = [];
     (async () => {
       for await (const event of fs.watch(projectRootPath, {
+        recursive: true,
         signal: ac.signal,
       })) {
-        watchEventList.push(event);
+        watchEventList.push(
+          typeof event.filename === 'string'
+            ? Object.assign(event, {
+                fullpath: path.join(projectRootPath, event.filename),
+              })
+            : event,
+        );
       }
     })().catch((error) => {
       if (error.name === 'AbortError') return;
