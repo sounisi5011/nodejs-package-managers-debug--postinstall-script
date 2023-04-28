@@ -325,6 +325,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   )) {
     const setupResult = await core.group(`Setup (${caseName})`, async () => {
       process.chdir(await fs.mkdtemp(origCWD + path.sep));
+      const projectRootPath = process.cwd();
 
       const pkgJsonPath = path.resolve('package.json');
       const shellQuotChar = process.platform === 'win32' ? `"` : `'`;
@@ -366,11 +367,24 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         new Uint8Array(0),
       );
 
-      return { expectedLocalPrefix, localInstallEnv };
+      return { projectRootPath, expectedLocalPrefix, localInstallEnv };
     });
     if (!setupResult) continue;
-    const { expectedLocalPrefix, localInstallEnv } = setupResult;
+    const { projectRootPath, expectedLocalPrefix, localInstallEnv } =
+      setupResult;
 
+    const ac = new AbortController();
+    const watchEventList = [];
+    (async () => {
+      for await (const event of fs.watch(projectRootPath, {
+        signal: ac.signal,
+      })) {
+        watchEventList.push(event);
+      }
+    })().catch((error) => {
+      if (error.name === 'AbortError') return;
+      throw error;
+    });
     if (pmType === 'npm') {
       await exec.exec('npm install', [tarballFullpath], {
         env: localInstallEnv,
@@ -404,6 +418,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     } else if (pmType === 'bun') {
       await exec.exec('bun add', [tarballFullpath], { env: localInstallEnv });
     }
+    ac.abort();
 
     await core.group(
       `Add a list of installed executables to the Job Summary (${caseName})`,
@@ -431,6 +446,15 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         await fs.appendFile(
           localInstallEnv.GITHUB_STEP_SUMMARY,
           [
+            `<details>`,
+            '<summary>Modified files</summary>',
+            '',
+            '```js',
+            inspect(watchEventList),
+            '```',
+            '',
+            '</details>',
+            '',
             '```js',
             `// Files in ${binDir}`,
             ...insertHeader(
