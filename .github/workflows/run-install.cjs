@@ -375,7 +375,8 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     const { projectRootPath, expectedLocalPrefix, localInstallEnv } =
       setupResult;
 
-    const watchEventList = [];
+    /** @type {Set<string>} */
+    const addedFiles = new Set();
     const watcher = chokidar
       .watch(projectRootPath, {
         ignoreInitial: true,
@@ -383,12 +384,8 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         disableGlobbing: true,
         ignorePermissionErrors: true,
       })
-      .on('all', (eventName, filename) => {
-        watchEventList.push({
-          eventName,
-          filename,
-          fullpath: path.join(projectRootPath, filename),
-        });
+      .on('add', (filename) => {
+        addedFiles.add(filename);
       })
       .on('error', (error) => {
         throw error;
@@ -456,10 +453,23 @@ module.exports = async ({ core, exec, require, packageManager }) => {
           localInstallEnv.GITHUB_STEP_SUMMARY,
           [
             `<details>`,
-            '<summary>Modified files</summary>',
+            '<summary>Added files</summary>',
             '',
-            '```js',
-            inspect(watchEventList),
+            '```',
+            ...(
+              await Promise.all(
+                [...addedFiles.values()].map(async (addedFilepath) => {
+                  const isFile = await fs
+                    .stat(addedFilepath)
+                    .then((stats) => stats.isFile())
+                    .catch((error) => {
+                      if (error.code === 'ENOENT') return false;
+                      throw error;
+                    });
+                  return isFile ? addedFilepath : [];
+                }),
+              )
+            ).flat(),
             '```',
             '',
             '</details>',
