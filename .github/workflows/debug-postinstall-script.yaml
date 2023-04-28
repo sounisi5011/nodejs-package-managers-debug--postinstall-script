@@ -28,11 +28,45 @@ jobs:
         with:
           path: ./${{ env.repo-dirname }}
 
+      - name: Enable Corepack (Automatically setup a package manager for Node.js)
+        shell: bash
+        run: |
+          if type yarn >/dev/null 2>&1; then
+            echo '[command]npm uninstall --global yarn'
+            npm uninstall --global yarn
+          fi
+          if type pnpm >/dev/null 2>&1; then
+            echo '[command]npm uninstall --global pnpm'
+            npm uninstall --global pnpm
+          fi
+          corepack enable
+          corepack enable npm
+
+          (
+            cd '${{ env.repo-dirname }}' \
+            && echo "pnpm-store-path=$(pnpm store path --silent)" >> "${GITHUB_ENV}"
+          )
+
+      - name: Cache pnpm
+        if: env.pnpm-store-path
+        uses: actions/cache@v3
+        with:
+          key: node-cache-${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          path: ${{ env.pnpm-store-path }}
+
       - name: Setup debug package
         shell: bash
         run: |
           readonly root_path="$PWD"
-          readonly debugger_package_path="${root_path}"'/${{ env.repo-dirname }}/postinstall-debug-package'
+          readonly repo_path="${root_path}"'/${{ env.repo-dirname }}'
+          readonly debugger_package_path="${repo_path}"'/postinstall-debug-package'
+
+          (
+            cd "${repo_path}" && {
+              pnpm install
+              pnpm run build
+            }
+          )
 
           (
             cd "${debugger_package_path}" && {
@@ -41,12 +75,12 @@ jobs:
             }
           )
 
-          cp -r "${root_path}"'/${{ env.repo-dirname }}/.github' "${root_path}"
+          cp -r "${repo_path}"/.github' "${root_path}"
           cp "${debugger_package_path}/postinstall.js" "${root_path}"
           echo '{}' > "${root_path}/package.json"
 
           find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
-            | xargs -0 tar -c --file './${{ env.archive-filename }}' --zstd --verbose
+            | xargs -0 -t tar -c --file './${{ env.archive-filename }}' --zstd --verbose
         # Note: Convert the debug package into a single archive file. This is for the following reasons:
         #       + Maintaining file permissions and case sensitive files
         #         see https://github.com/actions/upload-artifact/blob/v3.1.2/README.md#maintaining-file-permissions-and-case-sensitive-files
