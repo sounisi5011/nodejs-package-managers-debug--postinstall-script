@@ -3,17 +3,12 @@ const { appendFile, readdir, readFile, writeFile } = require('fs/promises');
 const path = require('path');
 const { inspect, promisify } = require('util');
 
+const usedPM = require('used-pm');
+
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
-const packageManager = (() => {
-  const matchGroups = process.env.npm_config_user_agent?.match(
-    /^(?<name>[^/ ]*)(?:\/(?<version>[^ ]*))?/,
-  )?.groups;
-  if (!matchGroups) return;
-  const { name = '', version = '' } = matchGroups;
-  return { name, version };
-})();
+const packageManager = usedPM();
 
 let isGlobalMode = false;
 // In npm and pnpm, global mode can be detected by reading the "npm_config_global" environment variable.
