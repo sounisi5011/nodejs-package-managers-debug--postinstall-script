@@ -1,0 +1,9 @@
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index b16de95cc4c8fa10da3600da877742de1c14cb5a..3b939a0670f2fbd82deeb96576aea35ac3bf2416 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -5,3 +5,4 @@ interface PackageManager {
+ declare const _default: () => PackageManager | undefined;
+ 
+ export { _default as default };
++export = _default;
