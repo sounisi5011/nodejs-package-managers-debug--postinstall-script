@@ -1,0 +1,8 @@
+diff --git a/build/index.js b/build/index.js
+index f80482f4e50b60e4d705b625261ee25fea7ae983..0c77ba303be7b618dd6447a407b0c4911bdf2eb1 100644
+--- a/build/index.js
++++ b/build/index.js
+@@ -1 +1 @@
+-import{opendir}from'fs/promises';import{join}from'path';export async function walk(root,callback){const dir=await opendir(root);const promises=[];for await(const file of dir){const current=join(root,file.name);promises.push((async()=>{const ignore=await callback(current,file);if(ignore||!file.isDirectory())return;promises.push(walk(current,callback));})());}return void Promise.all(promises);}
+\ No newline at end of file
++import{opendir}from'fs/promises';import{join}from'path';export async function walk(root,callback){const dir=await opendir(root).catch(()=>0);if(dir){const promises=[];while(1){try{const file=await dir.read();if(!file)break;const current=join(root,file.name);promises.push((async()=>{const ignore=await callback(current,file);if(ignore||!file.isDirectory())return;promises.push(walk(current,callback));})());}catch{}}promises.push(dir.close());await Promise.all(promises);}}

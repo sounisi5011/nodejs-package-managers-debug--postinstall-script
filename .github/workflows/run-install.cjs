@@ -1,7 +1,5 @@
 // @ts-check
 
-const chokidar = require('chokidar');
-
 const BIN_NAME = 'bar';
 
 /**
@@ -16,6 +14,8 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   const os = require('os');
   const path = require('path');
   const { inspect } = require('util');
+
+  const speedwalk = await import('speedwalk');
 
   function insertHeader(headerStr, lineList, linePrefix) {
     if (lineList.length < 1) return [];
@@ -119,7 +119,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
    * @param {() => Promise<T>} installFn
    * @returns {Promise<{ result: T, executablesFilepathList: string[] }>}
    */
-  async function watchNpmExecutables(
+  async function findInstalledNpmExecutables(
     { rootDirpaths, binName, isGlobal = false },
     installFn,
   ) {
@@ -132,68 +132,42 @@ module.exports = async ({ core, exec, require, packageManager }) => {
       ),
     ];
 
+    const startDatetime = Date.now();
+    const { result } = await installFn().then(async (result) => ({ result }));
+
     /** @type {Set<string>} */
     const actualExecutablesFilepathSet = new Set();
-    /** @type {Error | undefined} */
-    let watchError;
-    const watcher = chokidar
-      .watch(rootDirpathList, {
-        ignoreInitial: true,
-        followSymlinks: false,
-        disableGlobbing: true,
-        ignorePermissionErrors: true,
-      })
-      .on('add', (filepath) => {
-        const dirpath = path.dirname(filepath);
-        const filename = path.basename(filepath);
-        const isValidDir =
-          isGlobal ||
-          (path.basename(path.dirname(dirpath)) === 'node_modules' &&
-            path.basename(dirpath) === '.bin');
-        if (
-          isValidDir &&
-          (filename === binName || filename.startsWith(`${binName}.`))
-        ) {
-          actualExecutablesFilepathSet.add(filepath);
-        }
-      })
-      .on('error', (err) => {
-        watchError = err;
-      });
-    await new Promise((resolve, reject) =>
-      watcher
-        .on('ready', resolve)
-        .on('error', (error) => watcher.close().finally(() => reject(error))),
-    );
-
-    const { result } = await installFn()
-      .then(async (result) => {
-        await watcher.close().finally(() => {
-          if (watchError) throw watchError;
-        });
-        return { result };
-      })
-      .catch(async (error) => {
-        await watcher.close().catch(() => {});
-        throw error;
-      });
-
     await Promise.all(
-      [...actualExecutablesFilepathSet.values()].map(async (filepath) => {
-        const isFile = await fs
-          .stat(filepath)
-          .then((stats) => stats.isFile())
-          .catch((error) => {
-            if (error.code === 'ENOENT') return false;
-            throw error;
-          });
-        if (!isFile) actualExecutablesFilepathSet.delete(filepath);
+      rootDirpathList.map(async (rootDirpath) => {
+        await speedwalk.walk(rootDirpath, async (filepath, dirent) => {
+          if (dirent.isDirectory()) return;
+
+          const stats = await fs.lstat(filepath);
+          const isNewFile =
+            startDatetime < stats.mtimeMs ||
+            startDatetime < stats.ctimeMs ||
+            startDatetime < stats.birthtimeMs;
+          if (!isNewFile) return true;
+
+          const dirpath = path.dirname(filepath);
+          const filename = path.basename(filepath);
+          const isValidDir =
+            isGlobal ||
+            (path.basename(path.dirname(dirpath)) === 'node_modules' &&
+              path.basename(dirpath) === '.bin');
+          if (
+            isValidDir &&
+            (filename === binName || filename.startsWith(`${binName}.`))
+          ) {
+            actualExecutablesFilepathSet.add(filepath);
+          }
+        });
       }),
     );
 
     return {
       result,
-      executablesFilepathList: [...actualExecutablesFilepathSet],
+      executablesFilepathList: [...actualExecutablesFilepathSet].sort(),
     };
   }
 
@@ -464,7 +438,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     const { projectRootPath, localInstallEnv } = setupResult;
 
     const { executablesFilepathList: installedExecutables } =
-      await watchNpmExecutables(
+      await findInstalledNpmExecutables(
         { rootDirpaths: projectRootPath, binName: BIN_NAME },
         async () => {
           if (pmType === 'npm') {
@@ -581,7 +555,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     ),
   );
   const { executablesFilepathList: installedExecutables } =
-    await watchNpmExecutables(
+    await findInstalledNpmExecutables(
       {
         rootDirpaths: [
           path.resolve(os.homedir(), '/'),
