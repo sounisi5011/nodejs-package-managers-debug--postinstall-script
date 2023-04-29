@@ -2,6 +2,8 @@
 
 const BIN_NAME = 'bar';
 
+const Queue = require('promise-queue');
+
 /**
  * @param {object} args
  * @param {import('@actions/core')} args.core
@@ -14,8 +16,6 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   const os = require('os');
   const path = require('path');
   const { inspect } = require('util');
-
-  const speedwalk = await import('speedwalk');
 
   function insertHeader(headerStr, lineList, linePrefix) {
     if (lineList.length < 1) return [];
@@ -111,6 +111,61 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   }
 
   /**
+   * @param {string} rootpath
+   * @param {(filepath: string) => Promise<void>} callback
+   * @param {(promiseGen: () => Promise<void>) => void} [_addQueue]
+   * @returns {Promise<void>}
+   */
+  async function walkFile(rootpath, callback, _addQueue) {
+    const dir = await fs.opendir(rootpath).catch(() => null);
+    if (!dir) return;
+
+    /** @type {Promise<void> | undefined} */
+    let waitFinish;
+    if (!_addQueue) {
+      /** @type {() => void} */
+      let resolveWaitFinish = () => {};
+      /** @type {(reason: unknown) => void} */
+      let rejectWaitFinish = () => {};
+      waitFinish = new Promise((resolve, reject) => {
+        resolveWaitFinish = resolve;
+        rejectWaitFinish = reject;
+      });
+
+      const queue = new Queue(99999);
+      _addQueue = (promiseGen) => {
+        queue
+          .add(promiseGen)
+          .then(() => {
+            if (
+              queue.getQueueLength() === 0 &&
+              queue.getPendingLength() === 0
+            ) {
+              resolveWaitFinish();
+            }
+          })
+          .catch(rejectWaitFinish);
+      };
+    }
+    const addQueue = _addQueue;
+
+    while (true) {
+      try {
+        const dirent = await dir.read();
+        if (!dirent) break;
+
+        const filepath = path.join(rootpath, dirent.name);
+        if (dirent.isDirectory()) {
+          addQueue(async () => await walkFile(filepath, callback, addQueue));
+        } else {
+          addQueue(async () => await callback(filepath));
+        }
+      } catch {}
+    }
+
+    await Promise.all([dir.close(), waitFinish]);
+  }
+  /**
    * @template T
    * @param {object} args
    * @param {string | Iterable<string>} args.rootDirpaths
@@ -139,9 +194,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     const actualExecutablesFilepathSet = new Set();
     await Promise.all(
       rootDirpathList.map(async (rootDirpath) => {
-        await speedwalk.walk(rootDirpath, async (filepath, dirent) => {
-          if (dirent.isDirectory()) return;
-
+        await walkFile(rootDirpath, async (filepath) => {
           const stats = await fs.lstat(filepath).catch(() => null);
           if (!stats) return;
 
