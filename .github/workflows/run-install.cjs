@@ -142,12 +142,14 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         await speedwalk.walk(rootDirpath, async (filepath, dirent) => {
           if (dirent.isDirectory()) return;
 
-          const stats = await fs.lstat(filepath);
+          const stats = await fs.lstat(filepath).catch(() => null);
+          if (!stats) return;
+
           const isNewFile =
             startDatetime < stats.mtimeMs ||
             startDatetime < stats.ctimeMs ||
             startDatetime < stats.birthtimeMs;
-          if (!isNewFile) return true;
+          if (!isNewFile) return;
 
           const dirpath = path.dirname(filepath);
           const filename = path.basename(filepath);
