@@ -673,7 +673,12 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
     }
 
     winRootDirList.push(
-      ...[os.homedir(), ...nodeCliDirSet]
+      ...[
+        os.homedir(),
+        // see https://github.com/actions/runner-images/blob/0b558a470e1e916e0d3e1e020a216ffdde1810e7/images/win/scripts/Installers/Install-NodeLts.ps1#L7-L8
+        String.raw`C:\npm`,
+        ...nodeCliDirSet,
+      ]
         .concat(
           // see https://github.com/yarnpkg/yarn/blob/158d96dce95313d9a00218302631cd263877d164/src/cli/commands/global.js#L94-L98
           getWinEnv(process.env, 'LOCALAPPDATA') ?? [],
