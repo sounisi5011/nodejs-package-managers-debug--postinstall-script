@@ -17,7 +17,7 @@
       "groupName": "code formatter packages"
     },
     {
-      "matchPackageNames": ["@actions/core", "@actions/exec", "@actions/io"],
+      "matchPackageNames": ["@actions/core", "@actions/exec"],
       "groupName": "github workflow packages"
     }
   ]

@@ -17,12 +17,11 @@ function getWinEnv(env, name) {
 /**
  * @param {object} args
  * @param {import('@actions/core')} args.core
- * @param {import('@actions/io')} args.io
  * @param {import('@actions/exec')} args.exec
  * @param {typeof require} args.require
  * @param {string} args.packageManager
  */
-module.exports = async ({ core, io, exec, require, packageManager }) => {
+module.exports = async ({ core, exec, require, packageManager }) => {
   const fs = require('fs/promises');
   const os = require('os');
   const path = require('path');
@@ -641,19 +640,15 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
   /** @type {string[]} */
   const winRootDirList = [];
   if (process.platform === 'win32') {
-    const PROGRAMFILES = getWinEnv(process.env, 'PROGRAMFILES');
+    const PROGRAMFILES = getWinEnv(installEnv, 'PROGRAMFILES');
     const nodeCliDirSet = new Set(
-      [
-        ...(await io.findInPath('node')),
-        ...(await io.findInPath('npm')),
-        ...(await io.findInPath('yarn')),
-        ...(await io.findInPath('pnpm')),
-        ...(await io.findInPath('bun')),
-      ].map((cliFilepath) => {
-        return PROGRAMFILES
-          ? toSubdirPath(cliFilepath, PROGRAMFILES, 1)
-          : path.dirname(cliFilepath);
-      }),
+      getWinEnv(installEnv, 'Path')
+        ?.split(path.delimiter)
+        .map((cliDirpath) => {
+          return PROGRAMFILES
+            ? toSubdirPath(cliDirpath, PROGRAMFILES, 1)
+            : cliDirpath;
+        }),
     );
     if (
       PROGRAMFILES &&
@@ -668,7 +663,7 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
       ...[os.homedir(), ...nodeCliDirSet]
         .concat(
           // see https://github.com/yarnpkg/yarn/blob/158d96dce95313d9a00218302631cd263877d164/src/cli/commands/global.js#L94-L98
-          getWinEnv(process.env, 'LOCALAPPDATA') ?? [],
+          getWinEnv(installEnv, 'LOCALAPPDATA') ?? [],
         )
         .filter(excludeDuplicateParentDir),
     );
