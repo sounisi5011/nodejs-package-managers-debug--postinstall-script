@@ -3,17 +3,46 @@
 const BIN_NAME = 'bar';
 
 /**
+ * @param {Record<string, string | undefined>} env
+ * @param {string} name
+ */
+function getWinEnv(env, name) {
+  const value = env[name];
+  if (value !== undefined) return value;
+
+  const regexp = new RegExp(`^${name}$`, 'i');
+  return Object.entries(env).find(([key]) => regexp.test(key))?.[1];
+}
+
+/**
  * @param {object} args
  * @param {import('@actions/core')} args.core
+ * @param {import('@actions/io')} args.io
  * @param {import('@actions/exec')} args.exec
  * @param {typeof require} args.require
  * @param {string} args.packageManager
  */
-module.exports = async ({ core, exec, require, packageManager }) => {
+module.exports = async ({ core, io, exec, require, packageManager }) => {
   const fs = require('fs/promises');
   const os = require('os');
   const path = require('path');
   const { inspect } = require('util');
+
+  /**
+   * @param {string} target
+   * @param {string} parent
+   * @returns {boolean}
+   */
+  function pathStartsWith(target, parent) {
+    target = path.normalize(target);
+    parent = path.normalize(parent);
+
+    return (
+      target === parent ||
+      (target.startsWith(parent) &&
+        (parent.endsWith(path.sep) || target[parent.length] === path.sep))
+    );
+  }
 
   /**
    * @param {string} dirpath
@@ -23,12 +52,30 @@ module.exports = async ({ core, exec, require, packageManager }) => {
    */
   function excludeDuplicateParentDir(dirpath, _, dirpathList) {
     return !dirpathList.some(
-      path.sep === '\\'
-        ? (dirpathItem) =>
-            dirpath.startsWith(dirpathItem) &&
-            ['/', '\\'].includes(dirpath[dirpathItem.length])
-        : (dirpathItem) => dirpath.startsWith(`${dirpathItem}/`),
+      (dirpathItem) =>
+        dirpathItem !== dirpath && pathStartsWith(dirpath, dirpathItem),
     );
+  }
+
+  /**
+   * @param {string} target
+   * @param {string} parent
+   * @param {number} level
+   * @example
+   * toSubdirPath('/foo/bar/baz/qux', '/foo', 1)     // => '/foo/bar'
+   * toSubdirPath('/foo/bar/baz/qux', '/foo', 2)     // => '/foo/bar/baz'
+   * toSubdirPath('/foo/bar/baz/qux', '/foo', 3)     // => '/foo/bar/baz/qux'
+   * toSubdirPath('/foo/bar/baz/qux', '/foo/bar', 1) // => '/foo/bar/baz'
+   * toSubdirPath('/foo/bar/baz/qux', '/foo/bar', 2) // => '/foo/bar/baz/qux'
+   */
+  function toSubdirPath(target, parent, level) {
+    if (!pathStartsWith(target, parent)) return target;
+
+    const parentDirLevel = parent.split(path.sep).length;
+    return target
+      .split(path.sep)
+      .slice(0, parentDirLevel + Math.max(0, level))
+      .join(path.sep);
   }
 
   function insertHeader(headerStr, lineList, linePrefix) {
@@ -591,17 +638,41 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   }
   process.chdir(origCWD);
 
-  /** @type {readonly string[]} */
-  const winRootDirList =
-    process.platform === 'win32'
-      ? [
-          os.homedir(),
-          ...Object.entries(process.env)
-            // see https://github.com/yarnpkg/yarn/blob/158d96dce95313d9a00218302631cd263877d164/src/cli/commands/global.js#L94-L98
-            .filter(([key]) => /^(?:PROGRAMFILES|(?:LOCALAPPDATA)$)/i.test(key))
-            .flatMap(([, value]) => value || []),
-        ].filter(excludeDuplicateParentDir)
-      : [];
+  /** @type {string[]} */
+  const winRootDirList = [];
+  if (process.platform === 'win32') {
+    const PROGRAMFILES = getWinEnv(process.env, 'PROGRAMFILES');
+    const nodeCliDirSet = new Set(
+      [
+        ...(await io.findInPath('node')),
+        ...(await io.findInPath('npm')),
+        ...(await io.findInPath('yarn')),
+        ...(await io.findInPath('pnpm')),
+        ...(await io.findInPath('bun')),
+      ].map((cliFilepath) => {
+        return PROGRAMFILES
+          ? toSubdirPath(cliFilepath, PROGRAMFILES, 1)
+          : path.dirname(cliFilepath);
+      }),
+    );
+    if (
+      PROGRAMFILES &&
+      ![...nodeCliDirSet].some((nodeCliDir) =>
+        pathStartsWith(nodeCliDir, PROGRAMFILES),
+      )
+    ) {
+      nodeCliDirSet.add(PROGRAMFILES);
+    }
+
+    winRootDirList.push(
+      ...[os.homedir(), ...nodeCliDirSet]
+        .concat(
+          // see https://github.com/yarnpkg/yarn/blob/158d96dce95313d9a00218302631cd263877d164/src/cli/commands/global.js#L94-L98
+          getWinEnv(process.env, 'LOCALAPPDATA') ?? [],
+        )
+        .filter(excludeDuplicateParentDir),
+    );
+  }
   installEnv.POSTINSTALL_TYPE = 'Global Dependencies';
   await fs.writeFile(
     installEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
