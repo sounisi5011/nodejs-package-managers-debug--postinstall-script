@@ -15,6 +15,22 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   const path = require('path');
   const { inspect } = require('util');
 
+  /**
+   * @param {string} dirpath
+   * @param {unknown} _
+   * @param {readonly string[]} dirpathList
+   * @returns {boolean}
+   */
+  function excludeDuplicateParentDir(dirpath, _, dirpathList) {
+    return !dirpathList.some(
+      path.sep === '\\'
+        ? (dirpathItem) =>
+            dirpath.startsWith(dirpathItem) &&
+            ['/', '\\'].includes(dirpath[dirpathItem.length])
+        : (dirpathItem) => dirpath.startsWith(`${dirpathItem}/`),
+    );
+  }
+
   function insertHeader(headerStr, lineList, linePrefix) {
     if (lineList.length < 1) return [];
     return [
@@ -575,6 +591,17 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   }
   process.chdir(origCWD);
 
+  /** @type {readonly string[]} */
+  const winRootDirList =
+    process.platform === 'win32'
+      ? [
+          os.homedir(),
+          ...Object.entries(process.env)
+            // see https://github.com/yarnpkg/yarn/blob/158d96dce95313d9a00218302631cd263877d164/src/cli/commands/global.js#L94-L98
+            .filter(([key]) => /^(?:PROGRAMFILES|(?:LOCALAPPDATA)$)/i.test(key))
+            .flatMap(([, value]) => value || []),
+        ].filter(excludeDuplicateParentDir)
+      : [];
   installEnv.POSTINSTALL_TYPE = 'Global Dependencies';
   await fs.writeFile(
     installEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
@@ -588,7 +615,16 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         rootDirpaths: [
           path.resolve(os.homedir(), '/'),
           path.resolve(process.cwd(), '/'),
-        ],
+        ]
+          // In the Windows environment of GitHub Actions, traversing all files takes about 40 to 50 minutes.
+          // Therefore, we narrow down the directories to traverse.
+          .flatMap((rootDirpath) => {
+            return winRootDirList.some((winRoot) =>
+              winRoot.startsWith(rootDirpath),
+            )
+              ? winRootDirList
+              : rootDirpath;
+          }),
         binName: BIN_NAME,
         isGlobal: true,
       },
