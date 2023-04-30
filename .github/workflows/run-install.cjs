@@ -649,11 +649,19 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
         ...(await io.findInPath('yarn')),
         ...(await io.findInPath('pnpm')),
         ...(await io.findInPath('bun')),
-      ].map((cliFilepath) => {
-        return PROGRAMFILES
-          ? toSubdirPath(cliFilepath, PROGRAMFILES, 1)
-          : path.dirname(cliFilepath);
-      }),
+      ]
+        .map((cliFilepath) => path.dirname(cliFilepath))
+        .concat(
+          // see https://github.com/pnpm/pnpm/blob/v6.35.1/packages/global-bin-dir/src/index.ts#L37-L49
+          getWinEnv(process.env, 'Path')
+            ?.split(path.delimiter)
+            .filter((cliDirpath) => /node|npm/i.test(cliDirpath)) ?? [],
+        )
+        .map((cliDirpath) => {
+          return PROGRAMFILES
+            ? toSubdirPath(cliDirpath, PROGRAMFILES, 1)
+            : cliDirpath;
+        }),
     );
     if (
       PROGRAMFILES &&
