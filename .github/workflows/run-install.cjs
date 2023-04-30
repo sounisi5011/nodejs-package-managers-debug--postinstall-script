@@ -2,8 +2,6 @@
 
 const BIN_NAME = 'bar';
 
-const Queue = require('promise-queue');
-
 /**
  * @param {object} args
  * @param {import('@actions/core')} args.core
@@ -110,61 +108,36 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     return absolutePath;
   }
 
-  /**
-   * @param {string} rootpath
-   * @param {(filepath: string) => Promise<void>} callback
-   * @param {(promiseGen: () => Promise<void>) => void} [_addQueue]
-   * @returns {Promise<void>}
-   */
-  async function walkFile(rootpath, callback, _addQueue) {
-    const dir = await fs.opendir(rootpath).catch(() => null);
-    if (!dir) return;
+  const getFdPath = (() => {
+    const cwd = process.cwd();
+    /** @type {string|undefined} */
+    let fdPath;
 
-    /** @type {Promise<void> | undefined} */
-    let waitFinish;
-    if (!_addQueue) {
-      /** @type {() => void} */
-      let resolveWaitFinish = () => {};
-      /** @type {(reason: unknown) => void} */
-      let rejectWaitFinish = () => {};
-      waitFinish = new Promise((resolve, reject) => {
-        resolveWaitFinish = resolve;
-        rejectWaitFinish = reject;
-      });
-
-      const queue = new Queue(99999);
-      _addQueue = (promiseGen) => {
-        queue
-          .add(promiseGen)
-          .then(() => {
-            if (
-              queue.getQueueLength() === 0 &&
-              queue.getPendingLength() === 0
-            ) {
-              resolveWaitFinish();
+    /**
+     * @returns {Promise<string>}
+     */
+    return async () => {
+      if (!fdPath) {
+        // see https://stackoverflow.com/a/66955420
+        const rustTargetPlatform = await exec
+          .getExecOutput('rustc --version --verbose')
+          .then(({ stdout }) => {
+            const match = /^host:\s*(.+)\s*$/m.exec(stdout);
+            if (!match) {
+              throw new Error('Failed to detect Rust target');
             }
-          })
-          .catch(rejectWaitFinish);
-      };
-    }
-    const addQueue = _addQueue;
-
-    while (true) {
-      try {
-        const dirent = await dir.read();
-        if (!dirent) break;
-
-        const filepath = path.join(rootpath, dirent.name);
-        if (dirent.isDirectory()) {
-          addQueue(async () => await walkFile(filepath, callback, addQueue));
-        } else {
-          addQueue(async () => await callback(filepath));
-        }
-      } catch {}
-    }
-
-    await Promise.all([dir.close(), waitFinish]);
-  }
+            return match[1];
+          });
+        fdPath = path.join(
+          cwd,
+          `fd--${rustTargetPlatform}${
+            process.platform === 'win32' ? '.exe' : ''
+          }`,
+        );
+      }
+      return fdPath;
+    };
+  })();
   /**
    * @template T
    * @param {object} args
@@ -186,43 +159,43 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         ).map((rootDirpath) => path.resolve(rootDirpath)),
       ),
     ];
+    const fdPath = await getFdPath();
 
     const startDatetime = Date.now();
     const { result } = await installFn().then(async (result) => ({ result }));
 
-    /** @type {Set<string>} */
-    const actualExecutablesFilepathSet = new Set();
-    await Promise.all(
-      rootDirpathList.map(async (rootDirpath) => {
-        await walkFile(rootDirpath, async (filepath) => {
-          const stats = await fs.lstat(filepath).catch(() => null);
-          if (!stats) return;
-
-          const isNewFile =
-            startDatetime < stats.mtimeMs ||
-            startDatetime < stats.ctimeMs ||
-            startDatetime < stats.birthtimeMs;
-          if (!isNewFile) return;
-
-          const dirpath = path.dirname(filepath);
-          const filename = path.basename(filepath);
-          const isValidDir =
-            isGlobal ||
-            (path.basename(path.dirname(dirpath)) === 'node_modules' &&
-              path.basename(dirpath) === '.bin');
-          if (
-            isValidDir &&
-            (filename === binName || filename.startsWith(`${binName}.`))
-          ) {
-            actualExecutablesFilepathSet.add(filepath);
-          }
-        });
-      }),
-    );
+    const executablesFilepathList = await exec
+      .getExecOutput(
+        fdPath,
+        [
+          '--unrestricted',
+          process.platform === 'win32' ? '--ignore-case' : '--case-sensitive',
+          '--regex',
+          '--absolute-path',
+          '--no-follow',
+          '--type=file',
+          '--type=symlink',
+          `--changed-after=${new Date(startDatetime).toISOString()}`,
+          '--color=never',
+        ].concat(
+          isGlobal
+            ? [String.raw`^${binName}(?:\.|$)`]
+            : [
+                '--full-path',
+                path.sep === '\\'
+                  ? String.raw`[\\/]node_modules[\\/]\.bin[\\/]${binName}(?:\.[^\\/]+)?$`
+                  : String.raw`/node_modules/\.bin/${binName}(?:\.[^/]+)?$`,
+              ],
+          rootDirpathList,
+        ),
+      )
+      .then(({ stdout }) =>
+        stdout.split('\n').filter((filepath) => filepath !== ''),
+      );
 
     return {
       result,
-      executablesFilepathList: [...actualExecutablesFilepathSet].sort(),
+      executablesFilepathList,
     };
   }
 

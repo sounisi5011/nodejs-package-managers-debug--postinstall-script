@@ -5,7 +5,6 @@
     "fmt": "prettier --write '**/*'"
   },
   "dependencies": {
-    "promise-queue": "2.2.5",
     "used-pm": "1.0.0"
   },
   "devDependencies": {

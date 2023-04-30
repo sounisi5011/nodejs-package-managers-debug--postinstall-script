@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       repo-dirname: repo
+      fd-dirname: fd
       artifact-name: debug-package@${{ github.event.number && format('pr-{0}', github.event.number) || github.sha }}
       archive-filename: debug-package.tar.zst
       tarball-name: foo.tgz
@@ -27,6 +28,14 @@ jobs:
       - uses: actions/checkout@v3
         with:
           path: ./${{ env.repo-dirname }}
+
+      - name: Download fd
+        uses: robinraju/release-downloader@v1.7
+        with:
+          repository: sharkdp/fd
+          latest: true
+          fileName: "*"
+          out-file-path: ./${{ env.fd-dirname }}
 
       - name: Enable Corepack (Automatically setup a package manager for Node.js)
         shell: bash
@@ -79,7 +88,23 @@ jobs:
           cp "${debugger_package_path}/postinstall.js" "${root_path}"
           echo '{}' > "${root_path}/package.json"
 
-          find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
+          readonly fd_dest_path="${root_path}"'/${{ env.fd-dirname }}'
+          find "${fd_dest_path}" -type f -name '*.tar.gz' -print0 \
+            | xargs -0 -t -n 1 tar -x --gzip --verbose --directory "${fd_dest_path}" --file
+          unzip "${fd_dest_path}/*.zip" -d "${fd_dest_path}"
+          find "${fd_dest_path}" -type f \( -name 'fd' -executable -o -name 'fd.exe' \) -print0 | while read -r -d '' fd_filepath; do
+            fd_target_platform="$(
+              realpath --relative-to="${fd_dest_path}" "${fd_filepath}" \
+                | perl -pe 's/^fd-v\d+(?:\.\d+)+-|\/.*//g'
+            )"
+            fd_ext=''
+            if [[ "${fd_filepath}" == *'.exe' ]]; then
+              fd_ext='.exe'
+            fi
+            mv "${fd_filepath}" "${root_path}/fd--${fd_target_platform}${fd_ext}"
+          done
+
+          find . -mindepth 1 -maxdepth 1 -type d \( -name '${{ env.repo-dirname }}' -o -name '${{ env.fd-dirname }}' \) -prune -o -print0 \
             | xargs -0 -t tar -c --file './${{ env.archive-filename }}' --zstd --verbose
         # Note: Convert the debug package into a single archive file. This is for the following reasons:
         #       + Maintaining file permissions and case sensitive files
