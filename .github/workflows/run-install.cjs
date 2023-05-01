@@ -779,19 +779,19 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
         } else if (pmType === 'pnpm') {
           // The "pnpm add --global ..." command requires a global bin directory.
           // see https://github.com/pnpm/pnpm/issues/4658
-          const PNPM_HOME = path.resolve(os.homedir(), '.pnpm-home');
+          const globalBinDir = path.resolve(os.homedir(), '.pnpm-home');
           const pathEnv = Object.fromEntries(
             Object.entries(installEnv)
               .filter(([key]) => /^PATH$/i.test(key))
               .map(([key, value]) => [
                 key,
-                [value, PNPM_HOME].join(path.delimiter),
+                [value, globalBinDir].join(path.delimiter),
               ]),
           );
+          await exec.exec('pnpm config set global-bin-dir', [globalBinDir]);
           const env = {
             ...installEnv,
             ...pathEnv,
-            PNPM_HOME,
           };
           await fs.writeFile(
             env.DEBUG_ORIGINAL_ENV_JSON_PATH,
