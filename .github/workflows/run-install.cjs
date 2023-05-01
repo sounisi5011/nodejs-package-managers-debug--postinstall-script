@@ -663,12 +663,17 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
     // see https://stackoverflow.com/a/52411712
     const filesystemRootList = await exec
       .getExecOutput('wmic logicaldisk get name')
-      .then(({ stdout }) =>
-        stdout.split('\r\r\n').flatMap((value) => {
+      .then(({ stdout, stderr }) => {
+        ///// DEBUG /////
+        console.log({
+          'wmic logicaldisk get name': { stdout, stderr },
+        });
+        ///// DEBUG /////
+        return stdout.split('\r\r\n').flatMap((value) => {
           const match = /^\s*([A-Z]:)\s*$/i.exec(value);
           return match ? match[1] : [];
-        }),
-      );
+        });
+      });
 
     // In the Windows environment of GitHub Actions, traversing all files takes about 40 to 50 minutes.
     // Therefore, we narrow down the directories to traverse.
