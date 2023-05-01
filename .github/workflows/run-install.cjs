@@ -661,18 +661,25 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
     if (process.platform !== 'win32') return ['/'];
 
     // see https://stackoverflow.com/a/52411712
+    // see https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/wmic
+    // see https://qiita.com/nijinagome/items/a31298f2d0e55668a8c1
+    // see https://win.just4fun.biz/?PowerShell/%E8%AB%96%E7%90%86%E3%83%89%E3%83%A9%E3%82%A4%E3%83%96%E6%83%85%E5%A0%B1%E3%82%84%E3%83%89%E3%83%A9%E3%82%A4%E3%83%96%E3%83%AC%E3%82%BF%E3%83%BC%E3%81%AE%E4%B8%80%E8%A6%A7%E3%82%92%E5%8F%96%E5%BE%97%E3%81%99%E3%82%8B%E6%96%B9%E6%B3%95
+    // see https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-logicaldisk
+    // see https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-wmiobject?view=powershell-5.1
+    // see https://qiita.com/mizar/items/d8fa35dc9f027e095110
+    // see https://learn.microsoft.com/ja-jp/powershell/module/cimcmdlets/get-ciminstance?view=powershell-7.3
     const filesystemRootList = await exec
-      .getExecOutput('wmic logicaldisk get name')
+      .getExecOutput('powershell', [
+        '-Command',
+        '(Get-CimInstance -ClassName Win32_LogicalDisk).DeviceID',
+      ])
       .then(({ stdout, stderr }) => {
         ///// DEBUG /////
-        console.log({
-          'wmic logicaldisk get name': { stdout, stderr },
-        });
+        console.log({ stdout, stderr });
         ///// DEBUG /////
-        return stdout.split('\r\r\n').flatMap((value) => {
-          const match = /^\s*([A-Z]:)\s*$/i.exec(value);
-          return match ? match[1] : [];
-        });
+        return [...stdout.matchAll(/^[A-Z]:$/gim)].map(
+          ([volumeName]) => volumeName,
+        );
       });
 
     // In the Windows environment of GitHub Actions, traversing all files takes about 40 to 50 minutes.
