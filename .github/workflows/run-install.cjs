@@ -715,6 +715,17 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
       os.homedir(),
     ].filter(excludeDuplicateParentDir);
 
+    ///// DEBUG /////
+    console.log({
+      filesystemRootList,
+      nodeBinInstalledDirList,
+      nodeLikeBinInPathEnvList,
+      programFilesDirSet,
+      binDirSet,
+      winRootDirList,
+    });
+    ///// DEBUG /////
+
     return filesystemRootList.flatMap((rootDirpath) => {
       return winRootDirList.some((winRoot) => winRoot.startsWith(rootDirpath))
         ? winRootDirList
