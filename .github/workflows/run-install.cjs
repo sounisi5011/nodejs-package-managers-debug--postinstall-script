@@ -656,54 +656,71 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
   }
   process.chdir(origCWD);
 
-  /** @type {string[]} */
-  const winRootDirList = [];
-  if (process.platform === 'win32') {
-    const PROGRAMFILES = getWinEnv(process.env, 'PROGRAMFILES');
-    const nodeCliDirSet = new Set(
-      [
-        ...(await io.findInPath('node')),
-        ...(await io.findInPath('npm')),
-        ...(await io.findInPath('yarn')),
-        ...(await io.findInPath('pnpm')),
-        ...(await io.findInPath('bun')),
-      ]
-        .map((cliFilepath) => path.dirname(cliFilepath))
-        .concat(
-          // see https://github.com/pnpm/pnpm/blob/v6.35.1/packages/global-bin-dir/src/index.ts#L37-L49
-          getWinEnv(process.env, 'Path')
-            ?.split(path.delimiter)
-            .filter((cliDirpath) => /node|npm/i.test(cliDirpath)) ?? [],
-        )
-        .map((cliDirpath) => {
-          return PROGRAMFILES
-            ? toSubdirPath(cliDirpath, PROGRAMFILES, 1)
-            : cliDirpath;
-        }),
-    );
-    if (
-      PROGRAMFILES &&
-      ![...nodeCliDirSet].some((nodeCliDir) =>
-        pathStartsWith(nodeCliDir, PROGRAMFILES),
+  /** @type {readonly string[]} */
+  const rootDirpathList = await (async () => {
+    if (process.platform !== 'win32') return ['/'];
+
+    const filesystemRootList = [
+      path.resolve(os.homedir(), '/'),
+      path.resolve(process.cwd(), '/'),
+    ];
+
+    // In the Windows environment of GitHub Actions, traversing all files takes about 40 to 50 minutes.
+    // Therefore, we narrow down the directories to traverse.
+
+    // Find directories where "node" commands, etc. are installed
+    const nodeBinInstalledDirList = (
+      await Promise.all(
+        ['node', 'npm', 'yarn', 'pnpm', 'bun'].map((cliName) =>
+          io.findInPath(cliName),
+        ),
       )
-    ) {
-      nodeCliDirSet.add(PROGRAMFILES);
+    )
+      .flat()
+      .map((cliFilepath) => path.dirname(cliFilepath));
+
+    // see https://github.com/pnpm/pnpm/blob/v6.35.1/packages/global-bin-dir/src/index.ts#L37-L49
+    const nodeLikeBinInPathEnvList =
+      getWinEnv(process.env, 'Path')
+        ?.split(path.delimiter)
+        .filter((pathValue) => /node|npm/i.test(pathValue)) ?? [];
+
+    /** @type {Set<string>} */
+    const programFilesDirSet = new Set();
+    /** @type {Set<string>} */
+    const binDirSet = new Set([
+      // see https://github.com/actions/runner-images/blob/0b558a470e1e916e0d3e1e020a216ffdde1810e7/images/win/scripts/Installers/Install-NodeLts.ps1#L7-L8
+      String.raw`C:\npm`,
+    ]);
+    const PROGRAMFILES = getWinEnv(process.env, 'PROGRAMFILES');
+    for (const cliDirpath of new Set([
+      ...nodeBinInstalledDirList,
+      ...nodeLikeBinInPathEnvList,
+    ])) {
+      if (PROGRAMFILES && pathStartsWith(cliDirpath, PROGRAMFILES)) {
+        programFilesDirSet.add(toSubdirPath(cliDirpath, PROGRAMFILES, 1));
+      } else {
+        binDirSet.add(cliDirpath);
+      }
+    }
+    if (PROGRAMFILES && programFilesDirSet.size < 1) {
+      programFilesDirSet.add(PROGRAMFILES);
     }
 
-    winRootDirList.push(
-      ...[
-        os.homedir(),
-        // see https://github.com/actions/runner-images/blob/0b558a470e1e916e0d3e1e020a216ffdde1810e7/images/win/scripts/Installers/Install-NodeLts.ps1#L7-L8
-        String.raw`C:\npm`,
-        ...nodeCliDirSet,
-      ]
-        .concat(
-          // see https://github.com/yarnpkg/yarn/blob/158d96dce95313d9a00218302631cd263877d164/src/cli/commands/global.js#L94-L98
-          getWinEnv(process.env, 'LOCALAPPDATA') ?? [],
-        )
-        .filter(excludeDuplicateParentDir),
-    );
-  }
+    const winRootDirList = [
+      ...programFilesDirSet,
+      ...binDirSet,
+      // see https://github.com/yarnpkg/yarn/blob/158d96dce95313d9a00218302631cd263877d164/src/cli/commands/global.js#L94-L98
+      ...(getWinEnv(process.env, 'LOCALAPPDATA') ?? []),
+      os.homedir(),
+    ].filter(excludeDuplicateParentDir);
+
+    return filesystemRootList.flatMap((rootDirpath) => {
+      return winRootDirList.some((winRoot) => winRoot.startsWith(rootDirpath))
+        ? winRootDirList
+        : rootDirpath;
+    });
+  })();
   installEnv.POSTINSTALL_TYPE = 'Global Dependencies';
   await fs.writeFile(
     installEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
@@ -715,19 +732,7 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
     await findInstalledNpmExecutables(
       {
         fdCmdFullpath,
-        rootDirpaths: [
-          path.resolve(os.homedir(), '/'),
-          path.resolve(process.cwd(), '/'),
-        ]
-          // In the Windows environment of GitHub Actions, traversing all files takes about 40 to 50 minutes.
-          // Therefore, we narrow down the directories to traverse.
-          .flatMap((rootDirpath) => {
-            return winRootDirList.some((winRoot) =>
-              winRoot.startsWith(rootDirpath),
-            )
-              ? winRootDirList
-              : rootDirpath;
-          }),
+        rootDirpaths: rootDirpathList,
         binName: BIN_NAME,
         isGlobal: true,
       },
