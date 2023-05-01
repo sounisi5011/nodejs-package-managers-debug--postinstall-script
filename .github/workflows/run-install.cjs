@@ -3,6 +3,25 @@
 const BIN_NAME = 'bar';
 
 /**
+ * @param {string} name
+ * @param {Record<string, Record<string, string | undefined>>} [envObj]
+ * @returns {string}
+ */
+function getRequiredEnv(name, envObj) {
+  const [envVarName, env] = Object.entries(envObj ?? {})[0] ?? [
+    'process.env',
+    process.env,
+  ];
+  const value = env[name];
+  if (typeof value !== 'string') {
+    throw new Error(
+      `The ${name} environment variable is not defined in "${envVarName}"`,
+    );
+  }
+  return value;
+}
+
+/**
  * @param {Record<string, string | undefined>} env
  * @param {string} name
  */
@@ -275,7 +294,17 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
         return match[1];
       });
     const cmdExt = process.platform === 'win32' ? '.exe' : '';
-    const origFdPath = path.resolve(`./fd--${rustTargetPlatform}${cmdExt}`);
+
+    const origFdPath = path.resolve(
+      getRequiredEnv('FD_CMD_FILENAME').replace(
+        /\{(\w+)\}/g,
+        (matchStr, label) => {
+          if (label === 'target') return rustTargetPlatform;
+          if (label === 'ext') return cmdExt;
+          return matchStr;
+        },
+      ),
+    );
     const fdPath = path.resolve(path.dirname(tarballFullpath), `fd${cmdExt}`);
     await fs.rename(origFdPath, fdPath);
     console.log({ fdPath });
