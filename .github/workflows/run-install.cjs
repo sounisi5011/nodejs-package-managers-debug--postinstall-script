@@ -711,9 +711,11 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
       ...programFilesDirSet,
       ...binDirSet,
       // see https://github.com/yarnpkg/yarn/blob/158d96dce95313d9a00218302631cd263877d164/src/cli/commands/global.js#L94-L98
-      ...(getWinEnv(process.env, 'LOCALAPPDATA') ?? []),
+      getWinEnv(process.env, 'LOCALAPPDATA') ?? [],
       os.homedir(),
-    ].filter(excludeDuplicateParentDir);
+    ]
+      .flat()
+      .filter(excludeDuplicateParentDir);
 
     ///// DEBUG /////
     console.log({
