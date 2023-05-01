@@ -231,7 +231,7 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
           '--color=never',
         ].concat(
           isGlobal
-            ? ['.'] ///// DENUG /////
+            ? [String.raw`^${binName}(?:\.|$)`]
             : [
                 '--full-path',
                 path.sep === '\\'
@@ -679,9 +679,6 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
         ),
       );
 
-    ///// DENUG /////
-    return filesystemRootList;
-    ///// DEBUG /////
     // In the Windows environment of GitHub Actions, traversing all files takes about 40 to 50 minutes.
     // Therefore, we narrow down the directories to traverse.
 
@@ -747,7 +744,7 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
       value === undefined ? null : value,
     ),
   );
-  const { executablesFilepathList: modifiedFilepathList } =
+  const { executablesFilepathList: installedExecutables } =
     await findInstalledNpmExecutables(
       {
         fdCmdFullpath,
@@ -808,15 +805,7 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
   {
     const { GITHUB_STEP_SUMMARY } = defaultEnv;
     const binDirSet = new Set(
-      ///// DENUG /////
-      modifiedFilepathList
-        .filter((filepath) =>
-          new RegExp(String.raw`^${BIN_NAME}(?:\.|$)`, 'i').test(
-            path.basename(filepath),
-          ),
-        )
-        ///// DENUG /////
-        .map((filepath) => path.dirname(filepath)),
+      installedExecutables.map((filepath) => path.dirname(filepath)),
     );
 
     const debugDataList = await fs
@@ -884,28 +873,6 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
     await fs.appendFile(
       GITHUB_STEP_SUMMARY,
       [
-        ///// DENUG /////
-        `<details>`,
-        '<summary>Modified files</summary>',
-        '',
-        '```',
-        ...[
-          ...new Set(
-            modifiedFilepathList.map((modifiedFilepath) => {
-              const pathItemList = modifiedFilepath.split(path.sep);
-              const maxPathItem = 5;
-              return (
-                pathItemList.slice(0, maxPathItem).join(path.sep) +
-                (maxPathItem < pathItemList.length ? path.sep : '')
-              );
-            }),
-          ),
-        ].sort(),
-        '```',
-        '',
-        '</details>',
-        '',
-        ///// DENUG /////
         '```js',
         await Promise.all(
           [...binDirSet].map(async (binDir) => [
