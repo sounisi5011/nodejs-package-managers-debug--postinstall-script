@@ -171,47 +171,18 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
     return absolutePath;
   }
 
-  const getFdPath = (() => {
-    const cwd = process.cwd();
-    /** @type {string|undefined} */
-    let fdPath;
-
-    /**
-     * @returns {Promise<string>}
-     */
-    return async () => {
-      if (!fdPath) {
-        // see https://stackoverflow.com/a/66955420
-        const rustTargetPlatform = await exec
-          .getExecOutput('rustc --version --verbose')
-          .then(({ stdout }) => {
-            const match = /^host:\s*(.+)\s*$/m.exec(stdout);
-            if (!match) {
-              throw new Error('Failed to detect Rust target');
-            }
-            return match[1];
-          });
-        fdPath = path.join(
-          cwd,
-          `fd--${rustTargetPlatform}${
-            process.platform === 'win32' ? '.exe' : ''
-          }`,
-        );
-      }
-      return fdPath;
-    };
-  })();
   /**
    * @template T
    * @param {object} args
    * @param {string | Iterable<string>} args.rootDirpaths
    * @param {string} args.binName
    * @param {boolean} [args.isGlobal]
+   * @param {string} args.fdCmdFullpath
    * @param {() => Promise<T>} installFn
    * @returns {Promise<{ result: T, executablesFilepathList: string[] }>}
    */
   async function findInstalledNpmExecutables(
-    { rootDirpaths, binName, isGlobal = false },
+    { rootDirpaths, binName, isGlobal = false, fdCmdFullpath },
     installFn,
   ) {
     const rootDirpathList = [
@@ -222,14 +193,13 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
         ).map((rootDirpath) => path.resolve(rootDirpath)),
       ),
     ];
-    const fdPath = await getFdPath();
 
     const startDatetime = Date.now();
     const { result } = await installFn().then(async (result) => ({ result }));
 
     const executablesFilepathList = await exec
       .getExecOutput(
-        fdPath,
+        fdCmdFullpath,
         [
           '--unrestricted',
           process.platform === 'win32' ? '--ignore-case' : '--case-sensitive',
@@ -293,6 +263,25 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
       return origTarballPath;
     },
   );
+  const fdCmdFullpath = await core.group('Move fd command', async () => {
+    // see https://stackoverflow.com/a/66955420
+    const rustTargetPlatform = await exec
+      .getExecOutput('rustc --version --verbose')
+      .then(({ stdout }) => {
+        const match = /^host:\s*(.+)\s*$/m.exec(stdout);
+        if (!match) {
+          throw new Error('Failed to detect Rust target');
+        }
+        return match[1];
+      });
+    const cmdExt = process.platform === 'win32' ? '.exe' : '';
+    const origFdPath = path.resolve(`./fd--${rustTargetPlatform}${cmdExt}`);
+    const fdPath = path.resolve(path.dirname(tarballFullpath), `fd${cmdExt}`);
+    await fs.rename(origFdPath, fdPath);
+    console.log({ fdPath });
+
+    return fdPath;
+  });
 
   const postinstallFullpath = path.resolve('postinstall.js');
 
@@ -530,7 +519,7 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
 
     const { executablesFilepathList: installedExecutables } =
       await findInstalledNpmExecutables(
-        { rootDirpaths: projectRootPath, binName: BIN_NAME },
+        { fdCmdFullpath, rootDirpaths: projectRootPath, binName: BIN_NAME },
         async () => {
           if (pmType === 'npm') {
             await exec.exec('npm install', [tarballFullpath], {
@@ -696,6 +685,7 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
   const { executablesFilepathList: installedExecutables } =
     await findInstalledNpmExecutables(
       {
+        fdCmdFullpath,
         rootDirpaths: [
           path.resolve(os.homedir(), '/'),
           path.resolve(process.cwd(), '/'),
