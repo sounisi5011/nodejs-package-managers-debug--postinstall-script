@@ -16,17 +16,28 @@ jobs:
     runs-on: ubuntu-latest
     env:
       repo-dirname: repo
+      fd-src-dirname: fd-sources
       artifact-name: debug-package@${{ github.event.number && format('pr-{0}', github.event.number) || github.sha }}
       archive-filename: debug-package.tar.zst
       tarball-name: foo.tgz
+      fd-cmd-name: fd/{target}{ext}
     outputs:
       artifact-name: ${{ env.artifact-name }}
       archive-filename: ${{ env.archive-filename }}
       tarball-name: ${{ env.tarball-name }}
+      fd-cmd-name: ${{ env.fd-cmd-name }}
     steps:
       - uses: actions/checkout@v3
         with:
           path: ./${{ env.repo-dirname }}
+
+      - name: Download fd
+        uses: robinraju/release-downloader@v1.7
+        with:
+          repository: sharkdp/fd
+          latest: true
+          fileName: "*"
+          out-file-path: ./${{ env.fd-src-dirname }}
 
       - name: Enable Corepack (Automatically setup a package manager for Node.js)
         shell: bash
@@ -79,7 +90,29 @@ jobs:
           cp "${debugger_package_path}/postinstall.js" "${root_path}"
           echo '{}' > "${root_path}/package.json"
 
-          find . -mindepth 1 -maxdepth 1 -type d -name '${{ env.repo-dirname }}' -prune -o -print0 \
+          readonly fd_src_dirpath="${root_path}"'/${{ env.fd-src-dirname }}'
+          find "${fd_src_dirpath}" -type f -name '*.tar.gz' -print0 \
+            | xargs -0 -t -n 1 tar -x --gzip --verbose --directory "${fd_src_dirpath}" --file
+          unzip "${fd_src_dirpath}/*.zip" -d "${fd_src_dirpath}"
+          find "${fd_src_dirpath}" -type f \( -name 'fd' -executable -o -name 'fd.exe' \) -print0 | while read -r -d '' fd_src_filepath; do
+            fd_target_platform="$(
+              realpath --relative-to="${fd_src_dirpath}" "${fd_src_filepath}" \
+                | perl -pe 's/^fd-v\d+(?:\.\d+)+-|\/.*//g'
+            )"
+
+            fd_filepath_dest='${{ env.fd-cmd-name }}'
+            if [[ "${fd_src_filepath}" == *'.exe' ]]; then
+              fd_filepath_dest="${fd_filepath_dest//'{ext}'/.exe}"
+            else
+              fd_filepath_dest="${fd_filepath_dest//'{ext}'/}"
+            fi
+            fd_filepath_dest="${root_path}/${fd_filepath_dest//'{target}'/${fd_target_platform}}"
+
+            mkdir -p "$(dirname "${fd_filepath_dest}")"
+            mv "${fd_src_filepath}" "${fd_filepath_dest}"
+          done
+
+          find . -mindepth 1 -maxdepth 1 -type d \( -name '${{ env.repo-dirname }}' -o -name '${{ env.fd-src-dirname }}' \) -prune -o -print0 \
             | xargs -0 -t tar -c --file './${{ env.archive-filename }}' --zstd --verbose
         # Note: Convert the debug package into a single archive file. This is for the following reasons:
         #       + Maintaining file permissions and case sensitive files
@@ -175,6 +208,7 @@ jobs:
         env:
           RUNNER_TEMP_DIR: ${{ runner.temp }}
           TARBALL_PATH: ./${{ needs.setup.outputs.tarball-name }}
+          FD_CMD_FILENAME: ./${{ needs.setup.outputs.fd-cmd-name }}
         with:
           script: |
             const script = require('./.github/workflows/run-install.cjs');

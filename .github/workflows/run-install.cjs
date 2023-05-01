@@ -1,17 +1,101 @@
 // @ts-check
 
+const BIN_NAME = 'bar';
+
+/**
+ * @param {string} name
+ * @param {Record<string, Record<string, string | undefined>>} [envObj]
+ * @returns {string}
+ */
+function getRequiredEnv(name, envObj) {
+  const [envVarName, env] = Object.entries(envObj ?? {})[0] ?? [
+    'process.env',
+    process.env,
+  ];
+  const value = env[name];
+  if (typeof value !== 'string') {
+    throw new Error(
+      `The ${name} environment variable is not defined in "${envVarName}"`,
+    );
+  }
+  return value;
+}
+
+/**
+ * @param {Record<string, string | undefined>} env
+ * @param {string} name
+ */
+function getWinEnv(env, name) {
+  const value = env[name];
+  if (value !== undefined) return value;
+
+  const regexp = new RegExp(`^${name}$`, 'i');
+  return Object.entries(env).find(([key]) => regexp.test(key))?.[1];
+}
+
 /**
  * @param {object} args
  * @param {import('@actions/core')} args.core
+ * @param {import('@actions/io')} args.io
  * @param {import('@actions/exec')} args.exec
  * @param {typeof require} args.require
  * @param {string} args.packageManager
  */
-module.exports = async ({ core, exec, require, packageManager }) => {
+module.exports = async ({ core, io, exec, require, packageManager }) => {
   const fs = require('fs/promises');
   const os = require('os');
   const path = require('path');
   const { inspect } = require('util');
+
+  /**
+   * @param {string} target
+   * @param {string} parent
+   * @returns {boolean}
+   */
+  function pathStartsWith(target, parent) {
+    target = path.normalize(target);
+    parent = path.normalize(parent);
+
+    return (
+      target === parent ||
+      (target.startsWith(parent) &&
+        (parent.endsWith(path.sep) || target[parent.length] === path.sep))
+    );
+  }
+
+  /**
+   * @param {string} dirpath
+   * @param {unknown} _
+   * @param {readonly string[]} dirpathList
+   * @returns {boolean}
+   */
+  function excludeDuplicateParentDir(dirpath, _, dirpathList) {
+    return !dirpathList.some(
+      (dirpathItem) =>
+        dirpathItem !== dirpath && pathStartsWith(dirpath, dirpathItem),
+    );
+  }
+
+  /**
+   * @param {string} target
+   * @param {string} parent
+   * @param {number} level
+   * @example
+   * toSubdirPath('/foo/bar/baz/qux', '/foo', 1)     // => '/foo/bar'
+   * toSubdirPath('/foo/bar/baz/qux', '/foo', 2)     // => '/foo/bar/baz'
+   * toSubdirPath('/foo/bar/baz/qux', '/foo', 3)     // => '/foo/bar/baz/qux'
+   * toSubdirPath('/foo/bar/baz/qux', '/foo/bar', 1) // => '/foo/bar/baz'
+   * toSubdirPath('/foo/bar/baz/qux', '/foo/bar', 2) // => '/foo/bar/baz/qux'
+   */
+  function toSubdirPath(target, parent, level) {
+    if (!pathStartsWith(target, parent)) return target;
+
+    const parentDirLevel = parent.split(path.sep).length;
+    return target
+      .split(path.sep)
+      .slice(0, parentDirLevel + Math.max(0, level))
+      .join(path.sep);
+  }
 
   function insertHeader(headerStr, lineList, linePrefix) {
     if (lineList.length < 1) return [];
@@ -106,6 +190,67 @@ module.exports = async ({ core, exec, require, packageManager }) => {
     return absolutePath;
   }
 
+  /**
+   * @template T
+   * @param {object} args
+   * @param {string | Iterable<string>} args.rootDirpaths
+   * @param {string} args.binName
+   * @param {boolean} [args.isGlobal]
+   * @param {string} args.fdCmdFullpath
+   * @param {() => Promise<T>} installFn
+   * @returns {Promise<{ result: T, executablesFilepathList: string[] }>}
+   */
+  async function findInstalledNpmExecutables(
+    { rootDirpaths, binName, isGlobal = false, fdCmdFullpath },
+    installFn,
+  ) {
+    const rootDirpathList = [
+      ...new Set(
+        (typeof rootDirpaths === 'string'
+          ? [rootDirpaths]
+          : [...rootDirpaths]
+        ).map((rootDirpath) => path.resolve(rootDirpath)),
+      ),
+    ];
+
+    const startDatetime = Date.now();
+    const { result } = await installFn().then(async (result) => ({ result }));
+
+    const executablesFilepathList = await exec
+      .getExecOutput(
+        fdCmdFullpath,
+        [
+          '--unrestricted',
+          process.platform === 'win32' ? '--ignore-case' : '--case-sensitive',
+          '--regex',
+          '--absolute-path',
+          '--no-follow',
+          '--type=file',
+          '--type=symlink',
+          `--changed-after=${new Date(startDatetime).toISOString()}`,
+          '--color=never',
+        ].concat(
+          isGlobal
+            ? [String.raw`^${binName}(?:\.|$)`]
+            : [
+                '--full-path',
+                path.sep === '\\'
+                  ? String.raw`[\\/]node_modules[\\/]\.bin[\\/]${binName}(?:\.[^\\/]+)?$`
+                  : String.raw`/node_modules/\.bin/${binName}(?:\.[^/]+)?$`,
+              ],
+          rootDirpathList,
+        ),
+      )
+      .then(({ stdout }) =>
+        stdout.split('\n').filter((filepath) => filepath !== ''),
+      );
+
+    return {
+      result,
+      executablesFilepathList,
+    };
+  }
+
   const tarballFullpath = await core.group(
     'Move debugger package tarball',
     async () => {
@@ -137,6 +282,35 @@ module.exports = async ({ core, exec, require, packageManager }) => {
       return origTarballPath;
     },
   );
+  const fdCmdFullpath = await core.group('Move fd command', async () => {
+    // see https://stackoverflow.com/a/66955420
+    const rustTargetPlatform = await exec
+      .getExecOutput('rustc --version --verbose')
+      .then(({ stdout }) => {
+        const match = /^host:\s*(.+)\s*$/m.exec(stdout);
+        if (!match) {
+          throw new Error('Failed to detect Rust target');
+        }
+        return match[1];
+      });
+    const cmdExt = process.platform === 'win32' ? '.exe' : '';
+
+    const origFdPath = path.resolve(
+      getRequiredEnv('FD_CMD_FILENAME').replace(
+        /\{(\w+)\}/g,
+        (matchStr, label) => {
+          if (label === 'target') return rustTargetPlatform;
+          if (label === 'ext') return cmdExt;
+          return matchStr;
+        },
+      ),
+    );
+    const fdPath = path.resolve(path.dirname(tarballFullpath), `fd${cmdExt}`);
+    await fs.rename(origFdPath, fdPath);
+    console.log({ fdPath });
+
+    return fdPath;
+  });
 
   const postinstallFullpath = path.resolve('postinstall.js');
 
@@ -325,6 +499,7 @@ module.exports = async ({ core, exec, require, packageManager }) => {
   )) {
     const setupResult = await core.group(`Setup (${caseName})`, async () => {
       process.chdir(await fs.mkdtemp(origCWD + path.sep));
+      const projectRootPath = process.cwd();
 
       const pkgJsonPath = path.resolve('package.json');
       const shellQuotChar = process.platform === 'win32' ? `"` : `'`;
@@ -366,49 +541,71 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         new Uint8Array(0),
       );
 
-      return { expectedLocalPrefix, localInstallEnv };
+      return { projectRootPath, localInstallEnv };
     });
     if (!setupResult) continue;
-    const { expectedLocalPrefix, localInstallEnv } = setupResult;
+    const { projectRootPath, localInstallEnv } = setupResult;
 
-    if (pmType === 'npm') {
-      await exec.exec('npm install', [tarballFullpath], {
-        env: localInstallEnv,
-      });
-    } else if (pmType === 'yarn') {
-      if (packageManager.startsWith('yarn@1.')) {
-        await exec.exec(
-          'yarn add',
-          isWorkspacesProjectRoot
-            ? [tarballFullpath, '--ignore-workspace-root-check']
-            : [tarballFullpath],
-          { env: localInstallEnv },
-        );
-      } else {
-        await exec.exec(
-          'yarn add',
-          [yarnBerryAcceptsFullpath(tarballFullpath)],
-          {
-            env: localInstallEnv,
-          },
-        );
-      }
-    } else if (pmType === 'pnpm') {
-      await exec.exec(
-        'pnpm add',
-        isWorkspacesProjectRoot
-          ? ['--workspace-root', tarballFullpath]
-          : [tarballFullpath],
-        { env: localInstallEnv },
+    const { executablesFilepathList: installedExecutables } =
+      await findInstalledNpmExecutables(
+        { fdCmdFullpath, rootDirpaths: projectRootPath, binName: BIN_NAME },
+        async () => {
+          if (pmType === 'npm') {
+            await exec.exec('npm install', [tarballFullpath], {
+              env: localInstallEnv,
+            });
+          } else if (pmType === 'yarn') {
+            if (packageManager.startsWith('yarn@1.')) {
+              await exec.exec(
+                'yarn add',
+                isWorkspacesProjectRoot
+                  ? [tarballFullpath, '--ignore-workspace-root-check']
+                  : [tarballFullpath],
+                { env: localInstallEnv },
+              );
+            } else {
+              await exec.exec(
+                'yarn add',
+                [yarnBerryAcceptsFullpath(tarballFullpath)],
+                {
+                  env: localInstallEnv,
+                },
+              );
+            }
+          } else if (pmType === 'pnpm') {
+            await exec.exec(
+              'pnpm add',
+              isWorkspacesProjectRoot
+                ? ['--workspace-root', tarballFullpath]
+                : [tarballFullpath],
+              { env: localInstallEnv },
+            );
+          } else if (pmType === 'bun') {
+            await exec.exec('bun add', [tarballFullpath], {
+              env: localInstallEnv,
+            });
+          }
+        },
       );
-    } else if (pmType === 'bun') {
-      await exec.exec('bun add', [tarballFullpath], { env: localInstallEnv });
-    }
 
     await core.group(
       `Add a list of installed executables to the Job Summary (${caseName})`,
       async () => {
-        const binDir = path.resolve(expectedLocalPrefix, 'node_modules/.bin');
+        if (installedExecutables.length < 1) {
+          await fs.appendFile(
+            localInstallEnv.GITHUB_STEP_SUMMARY,
+            [
+              '*No executables created in `node_modules/.bin` directory.*',
+              '',
+              '',
+            ].join('\n'),
+          );
+          return;
+        }
+
+        const binDirSet = new Set(
+          installedExecutables.map((filepath) => path.dirname(filepath)),
+        );
         const debugData = await fs
           .readFile(localInstallEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
           .then(parseJsonLines)
@@ -432,27 +629,120 @@ module.exports = async ({ core, exec, require, packageManager }) => {
           localInstallEnv.GITHUB_STEP_SUMMARY,
           [
             '```js',
-            `// Files in ${binDir}`,
-            ...insertHeader(
-              '// This path can also be got using environment variables:',
-              filepathUsingEnvNameList(
-                binDir,
-                debugData.env,
-                localInstallEnv,
-              ).map(({ path }) => path),
-              '//     ',
+            await Promise.all(
+              [...binDirSet].map(async (binDir) => [
+                `// Files in ${binDir}`,
+                ...insertHeader(
+                  '// This path can also be got using environment variables:',
+                  filepathUsingEnvNameList(
+                    binDir,
+                    debugData.env,
+                    localInstallEnv,
+                  ).map(({ path }) => path),
+                  '//     ',
+                ),
+                inspect(await fs.readdir(binDir).catch((error) => error)),
+              ]),
             ),
-            inspect(await fs.readdir(binDir).catch((error) => error)),
             '```',
             '',
             '',
-          ].join('\n'),
+          ]
+            .flat(2)
+            .join('\n'),
         );
       },
     );
   }
   process.chdir(origCWD);
 
+  /** @type {readonly string[]} */
+  const rootDirpathList = await (async () => {
+    if (process.platform !== 'win32') return ['/'];
+
+    // see https://stackoverflow.com/a/52411712
+    // see https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/wmic
+    // see https://qiita.com/nijinagome/items/a31298f2d0e55668a8c1
+    // see https://win.just4fun.biz/?PowerShell/%E8%AB%96%E7%90%86%E3%83%89%E3%83%A9%E3%82%A4%E3%83%96%E6%83%85%E5%A0%B1%E3%82%84%E3%83%89%E3%83%A9%E3%82%A4%E3%83%96%E3%83%AC%E3%82%BF%E3%83%BC%E3%81%AE%E4%B8%80%E8%A6%A7%E3%82%92%E5%8F%96%E5%BE%97%E3%81%99%E3%82%8B%E6%96%B9%E6%B3%95
+    // see https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-logicaldisk
+    // see https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-wmiobject?view=powershell-5.1
+    // see https://qiita.com/mizar/items/d8fa35dc9f027e095110
+    // see https://learn.microsoft.com/ja-jp/powershell/module/cimcmdlets/get-ciminstance?view=powershell-7.3
+    const filesystemRootList = await exec
+      .getExecOutput('powershell', [
+        '-Command',
+        '(Get-CimInstance -ClassName Win32_LogicalDisk).DeviceID',
+      ])
+      .then(({ stdout }) => [
+        ...new Set(
+          (function* () {
+            yield path.resolve(os.homedir(), '/');
+            yield path.resolve(process.cwd(), '/');
+            for (const volumeName of stdout.matchAll(/^[A-Z]:$/gim)) {
+              yield volumeName + path.sep;
+            }
+          })(),
+        ),
+      ]);
+
+    // In the Windows environment of GitHub Actions, traversing all files takes about 40 to 50 minutes.
+    // Therefore, we narrow down the directories to traverse.
+
+    // Find directories where "node" commands, etc. are installed
+    const nodeBinInstalledDirList = (
+      await Promise.all(
+        ['node', 'npm', 'yarn', 'pnpm', 'bun'].map((cliName) =>
+          io.findInPath(cliName),
+        ),
+      )
+    )
+      .flat()
+      .map((cliFilepath) => path.dirname(cliFilepath));
+
+    // see https://github.com/pnpm/pnpm/blob/v6.35.1/packages/global-bin-dir/src/index.ts#L37-L49
+    const nodeLikeBinInPathEnvList =
+      getWinEnv(process.env, 'Path')
+        ?.split(path.delimiter)
+        .filter((pathValue) => /node|npm/i.test(pathValue)) ?? [];
+
+    /** @type {Set<string>} */
+    const programFilesDirSet = new Set();
+    /** @type {Set<string>} */
+    const binDirSet = new Set([
+      // see https://github.com/actions/runner-images/blob/0b558a470e1e916e0d3e1e020a216ffdde1810e7/images/win/scripts/Installers/Install-NodeLts.ps1#L7-L8
+      String.raw`C:\npm`,
+    ]);
+    const PROGRAMFILES = getWinEnv(process.env, 'PROGRAMFILES');
+    for (const cliDirpath of new Set([
+      ...nodeBinInstalledDirList,
+      ...nodeLikeBinInPathEnvList,
+    ])) {
+      if (PROGRAMFILES && pathStartsWith(cliDirpath, PROGRAMFILES)) {
+        programFilesDirSet.add(toSubdirPath(cliDirpath, PROGRAMFILES, 1));
+      } else {
+        binDirSet.add(cliDirpath);
+      }
+    }
+    if (PROGRAMFILES && programFilesDirSet.size < 1) {
+      programFilesDirSet.add(PROGRAMFILES);
+    }
+
+    const winRootDirList = [
+      ...programFilesDirSet,
+      ...binDirSet,
+      // see https://github.com/yarnpkg/yarn/blob/158d96dce95313d9a00218302631cd263877d164/src/cli/commands/global.js#L94-L98
+      getWinEnv(process.env, 'LOCALAPPDATA') ?? [],
+      os.homedir(),
+    ]
+      .flat()
+      .filter(excludeDuplicateParentDir);
+
+    return filesystemRootList.flatMap((rootDirpath) => {
+      return winRootDirList.some((winRoot) => winRoot.startsWith(rootDirpath))
+        ? winRootDirList
+        : rootDirpath;
+    });
+  })();
   installEnv.POSTINSTALL_TYPE = 'Global Dependencies';
   await fs.writeFile(
     installEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
@@ -460,48 +750,70 @@ module.exports = async ({ core, exec, require, packageManager }) => {
       value === undefined ? null : value,
     ),
   );
-  if (pmType === 'npm') {
-    await exec.exec('npm install --global', [tarballFullpath], {
-      env: installEnv,
-    });
-  } else if (pmType === 'yarn') {
-    if (packageManager.startsWith('yarn@1.')) {
-      await exec.exec('yarn global add', [tarballFullpath], {
-        env: installEnv,
-      });
-    } else {
-      // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
-      await exec.exec(
-        'yarn dlx --package',
-        [yarnBerryAcceptsFullpath(tarballFullpath), 'bar'],
-        { env: installEnv },
-      );
-    }
-  } else if (pmType === 'pnpm') {
-    // The "pnpm add --global ..." command requires a global bin directory.
-    // see https://github.com/pnpm/pnpm/issues/4658
-    const PNPM_HOME = path.resolve(os.homedir(), '.pnpm-home');
-    const pathEnv = Object.fromEntries(
-      Object.entries(installEnv)
-        .filter(([key]) => /^PATH$/i.test(key))
-        .map(([key, value]) => [key, [value, PNPM_HOME].join(path.delimiter)]),
-    );
-    const env = {
-      ...installEnv,
-      ...pathEnv,
-      PNPM_HOME,
-    };
-    await fs.writeFile(
-      env.DEBUG_ORIGINAL_ENV_JSON_PATH,
-      JSON.stringify(env, (_, value) => (value === undefined ? null : value)),
-    );
+  const { executablesFilepathList: installedExecutables } =
+    await findInstalledNpmExecutables(
+      {
+        fdCmdFullpath,
+        rootDirpaths: rootDirpathList,
+        binName: BIN_NAME,
+        isGlobal: true,
+      },
+      async () => {
+        if (pmType === 'npm') {
+          await exec.exec('npm install --global', [tarballFullpath], {
+            env: installEnv,
+          });
+        } else if (pmType === 'yarn') {
+          if (packageManager.startsWith('yarn@1.')) {
+            await exec.exec('yarn global add', [tarballFullpath], {
+              env: installEnv,
+            });
+          } else {
+            // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
+            await exec.exec(
+              'yarn dlx --package',
+              [yarnBerryAcceptsFullpath(tarballFullpath), BIN_NAME],
+              { env: installEnv },
+            );
+          }
+        } else if (pmType === 'pnpm') {
+          // The "pnpm add --global ..." command requires a global bin directory.
+          // see https://github.com/pnpm/pnpm/issues/4658
+          const PNPM_HOME = path.resolve(os.homedir(), '.pnpm-home');
+          const pathEnv = Object.fromEntries(
+            Object.entries(installEnv)
+              .filter(([key]) => /^PATH$/i.test(key))
+              .map(([key, value]) => [
+                key,
+                [value, PNPM_HOME].join(path.delimiter),
+              ]),
+          );
+          const env = {
+            ...installEnv,
+            ...pathEnv,
+            PNPM_HOME,
+          };
+          await fs.writeFile(
+            env.DEBUG_ORIGINAL_ENV_JSON_PATH,
+            JSON.stringify(env, (_, value) =>
+              value === undefined ? null : value,
+            ),
+          );
 
-    await exec.exec('pnpm add --global', [tarballFullpath], { env });
-  } else if (pmType === 'bun') {
-    await exec.exec('bun add --global', [tarballFullpath], { env: installEnv });
-  }
+          await exec.exec('pnpm add --global', [tarballFullpath], { env });
+        } else if (pmType === 'bun') {
+          await exec.exec('bun add --global', [tarballFullpath], {
+            env: installEnv,
+          });
+        }
+      },
+    );
   {
     const { GITHUB_STEP_SUMMARY } = defaultEnv;
+    const binDirSet = new Set(
+      installedExecutables.map((filepath) => path.dirname(filepath)),
+    );
+
     const debugDataList = await fs
       .readFile(installEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
       .then(parseJsonLines)
@@ -509,22 +821,19 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         if (error.code === 'ENOENT') return [];
         throw error;
       });
-    const { binCommand, binName, ...debugData } =
+    const { binCommand, ...debugData } =
       debugDataList.find(
         ({ postinstallType }) =>
           postinstallType === installEnv.POSTINSTALL_TYPE,
       ) ?? {};
     async function inspectInstalledBin(bindirPath) {
-      const showAll = !binName;
       return await fs
         .readdir(bindirPath)
         .then((files) => {
-          if (showAll) return inspect(files);
-
           const { binFiles = [], otherFiles = [] } = files.reduce(
             ({ binFiles = [], otherFiles = [] }, file) => {
               const isInstalledBin =
-                file === binName || file.startsWith(`${binName}.`);
+                file === BIN_NAME || file.startsWith(`${BIN_NAME}.`);
               (isInstalledBin ? binFiles : otherFiles).push(file);
               return { binFiles, otherFiles };
             },
@@ -537,111 +846,66 @@ module.exports = async ({ core, exec, require, packageManager }) => {
         .catch((error) => inspect(error));
     }
 
-    const prefixEnvName = 'npm_config_prefix';
+    /** @type {Map<string, string>} */
+    const binCommandMap = new Map();
     if (binCommand?.result) {
-      await fs.appendFile(
-        GITHUB_STEP_SUMMARY,
-        [
-          '```js',
-          indentStr(
-            [
-              `$(${binCommand.args.join(' ')})`,
-              `( ${binCommand.result} )`,
-            ].join('\n'),
-            '// ',
-            '// Files in ',
-          ),
-          ...insertHeader(
-            '// This path can also be got using environment variables:',
-            filepathUsingEnvNameList(
-              binCommand.result,
-              debugData.env,
-              installEnv,
-            ).map(({ path }) => path),
-            '//     ',
-          ),
-          await inspectInstalledBin(binCommand.result),
-          '```',
-          '',
-          '',
-        ].join('\n'),
-      );
-    } else if (debugData.env?.[prefixEnvName]) {
-      const prefix = debugData.env[prefixEnvName];
-      // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
-      const binDir =
-        process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
-
-      const binDirUsingEnvNameList = filepathUsingEnvNameList(
-        binDir,
-        debugData.env,
-        installEnv,
-      );
-      await fs.appendFile(
-        GITHUB_STEP_SUMMARY,
-        [
-          '```js',
-          indentStr(
-            [
-              ...binDirUsingEnvNameList
-                .filter(({ envName }) => envName === prefixEnvName)
-                .map(({ path }) => path),
-              `( ${binDir} )`,
-            ].join('\n'),
-            '// ',
-            '// Files in ',
-          ),
-          ...insertHeader(
-            '// This path can also be got using other environment variables:',
-            binDirUsingEnvNameList
-              .filter(({ envName }) => envName !== prefixEnvName)
-              .map(({ path }) => path),
-            '//     ',
-          ),
-          await inspectInstalledBin(binDir),
-          '```',
-          '',
-          '',
-        ].join('\n'),
-      );
+      binCommandMap.set(binCommand.args.join(' '), binCommand.result);
     } else if (pmType === 'bun') {
       const binCmdArgs = ['bun', 'pm', 'bin', '--global'];
-      const binDir = await exec
-        .getExecOutput(binCmdArgs[0], binCmdArgs.slice(1), { env: installEnv })
-        .then(({ stdout }) => stdout.trim());
-      const debugData =
-        debugDataList.find(
-          ({ postinstallType }) =>
-            postinstallType === installEnv.POSTINSTALL_TYPE,
-        ) ??
-        // Bun does not execute the "postinstall" script of installed dependencies.
-        // Instead, it uses the debug data from the project's "postinstall" script.
-        debugDataList.find(({ postinstallType }) =>
-          /^Project$/i.test(postinstallType),
-        ) ??
-        {};
-      await fs.appendFile(
-        GITHUB_STEP_SUMMARY,
-        [
-          '```js',
-          indentStr(
-            [`$(${binCmdArgs.join(' ')})`, `( ${binDir} )`].join('\n'),
-            '// ',
-            '// Files in ',
-          ),
-          ...insertHeader(
-            '// This path can also be got using environment variables:',
-            filepathUsingEnvNameList(binDir, debugData.env, installEnv).map(
-              ({ path }) => path,
-            ),
-            '//     ',
-          ),
-          await inspectInstalledBin(binDir),
-          '```',
-          '',
-          '',
-        ].join('\n'),
+      binCommandMap.set(
+        binCmdArgs.join(' '),
+        await exec
+          .getExecOutput(binCmdArgs[0], binCmdArgs.slice(1), {
+            env: installEnv,
+          })
+          .then(({ stdout }) => stdout.trim()),
       );
     }
+
+    if (binDirSet.size < 1) {
+      const prefixEnvName = 'npm_config_prefix';
+      if (debugData.env?.[prefixEnvName]) {
+        const prefix = debugData.env[prefixEnvName];
+        // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
+        const binDir =
+          process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
+        binDirSet.add(path.normalize(binDir));
+      }
+      for (const binDir of binCommandMap.values()) {
+        binDirSet.add(path.normalize(binDir));
+      }
+    }
+
+    await fs.appendFile(
+      GITHUB_STEP_SUMMARY,
+      [
+        '```js',
+        await Promise.all(
+          [...binDirSet].map(async (binDir) => [
+            `// Files in ${binDir}`,
+            ...insertHeader(
+              '// This path can also be got using environment variables:',
+              filepathUsingEnvNameList(binDir, debugData.env, installEnv).map(
+                ({ path }) => path,
+              ),
+              '//     ',
+            ),
+            ...insertHeader(
+              '// This path can also be got via commands:',
+              [...binCommandMap.entries()]
+                .filter(([, result]) => result === binDir)
+                .map(([cmd]) => cmd),
+              '//     ',
+            ),
+            await inspectInstalledBin(binDir),
+          ]),
+        ),
+        '```',
+        '',
+        '',
+      ]
+        .flat(2)
+        .join('\n'),
+    );
   }
 };
