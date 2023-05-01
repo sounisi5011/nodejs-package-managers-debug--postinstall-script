@@ -275,6 +275,9 @@ async function getEnvAddedByPackageManager(
     ? ['pnpm', 'bin'].concat(isGlobalMode ? '--global' : [])
     : packageManager?.name === 'npm'
     ? ['npm', 'bin'].concat(isGlobalMode ? '--global' : [])
+    : packageManager?.name === 'bun'
+    ? // see https://bun.sh/docs/install/utilities
+      ['bun', 'pm', 'bin'].concat(isGlobalMode ? '--global' : [])
     : null;
   const binCommandResult =
     binCommandArgs &&
