@@ -678,7 +678,7 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
         console.log({ stdout, stderr });
         ///// DEBUG /////
         return [...stdout.matchAll(/^[A-Z]:$/gim)].map(
-          ([volumeName]) => volumeName,
+          ([volumeName]) => volumeName + path.sep,
         );
       });
 
