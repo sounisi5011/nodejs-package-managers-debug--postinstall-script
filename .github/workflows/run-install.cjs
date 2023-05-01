@@ -673,11 +673,17 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
         '-Command',
         '(Get-CimInstance -ClassName Win32_LogicalDisk).DeviceID',
       ])
-      .then(({ stdout }) =>
-        [...stdout.matchAll(/^[A-Z]:$/gim)].map(
-          ([volumeName]) => volumeName + path.sep,
+      .then(({ stdout }) => [
+        ...new Set(
+          (function* () {
+            yield path.resolve(os.homedir(), '/');
+            yield path.resolve(process.cwd(), '/');
+            for (const volumeName of stdout.matchAll(/^[A-Z]:$/gim)) {
+              yield volumeName + path.sep;
+            }
+          })(),
         ),
-      );
+      ]);
 
     // In the Windows environment of GitHub Actions, traversing all files takes about 40 to 50 minutes.
     // Therefore, we narrow down the directories to traverse.
