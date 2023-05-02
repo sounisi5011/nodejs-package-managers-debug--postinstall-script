@@ -812,6 +812,36 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
               };
             },
           },
+          'set both the global-bin-dir setting and the PNPM_HOME env variable':
+            {
+              async setup({ env }) {
+                const globalBinDirByConfig = path.resolve(
+                  os.homedir(),
+                  '.pnpm-home-by-pnpm-config',
+                );
+                const globalBinDirByEnv = path.resolve(
+                  os.homedir(),
+                  '.pnpm-home-by-PNPM_HOME-env-var',
+                );
+
+                await exec.exec('pnpm config set global-bin-dir', [
+                  globalBinDirByConfig,
+                ]);
+                return {
+                  env: Object.assign(
+                    updatePathEnv(env, (value) => {
+                      return (value ? [value] : [])
+                        .concat(globalBinDirByConfig, globalBinDirByEnv)
+                        .join(path.delimiter);
+                    }),
+                    { PNPM_HOME: globalBinDirByEnv },
+                  ),
+                };
+              },
+              async cleanup() {
+                await exec.exec('pnpm config delete global-bin-dir');
+              },
+            },
         }
       : {}),
   };
