@@ -777,6 +777,7 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
   /**
    * @type {Record<string, {
    *   setup: (options: { env: Readonly<typeof process.env> }) => Promise<{ env: typeof process.env }>,
+   *   cleanup?: () => Promise<void>,
    * }>}
    */
   const globalInstallCases = {
@@ -793,6 +794,9 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
                   return (value ? value + path.delimiter : '') + globalBinDir;
                 }),
               };
+            },
+            async cleanup() {
+              await exec.exec('pnpm config delete global-bin-dir');
             },
           },
           'set the PNPM_HOME env variable': {
@@ -878,6 +882,11 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
           }
         },
       );
+
+    const cleanup = caseItem?.[1].cleanup;
+    if (cleanup) {
+      await core.group(`Cleanup${labelSuffix}`, cleanup);
+    }
 
     await core.group(
       `Add a list of installed executables to the Job Summary${labelSuffix}`,
