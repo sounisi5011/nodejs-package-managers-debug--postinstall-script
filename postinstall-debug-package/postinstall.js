@@ -323,6 +323,8 @@ async function getEnvAddedByPackageManager(
     cwd,
     ...expectedValues,
     isGlobalMode,
+    // see https://yarnpkg.com/advanced/pnpapi#processversionspnp
+    pnpVersion: process.versions.pnp,
     realBin: binFilepathList,
     ...(binCommand?.args
       ? { [binCommand.args.join(' ')]: binCommandResult }
