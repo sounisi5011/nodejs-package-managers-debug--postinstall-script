@@ -566,6 +566,7 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
         } else {
           if (pnp) {
             // see https://classic.yarnpkg.com/en/docs/pnp/getting-started
+            // see https://github.com/yarnpkg/yarn/pull/6382
             pkgJson.installConfig = {
               pnp: true,
             };
@@ -893,6 +894,10 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
             expectedPnPEnabled: pnp,
           }),
         });
+        if (pmType === 'yarn' && !isYarnBerry && pnp) {
+          // see https://github.com/yarnpkg/yarn/pull/6382
+          globalInstallEnv.YARN_PLUGNPLAY_OVERRIDE = '1';
+        }
         await fs.writeFile(
           globalInstallEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
           JSON.stringify(globalInstallEnv, (_, value) =>
@@ -923,11 +928,9 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
             });
           } else if (pmType === 'yarn') {
             if (pmVersion.startsWith('1.')) {
-              await exec.exec(
-                'yarn global add',
-                pnp ? [tarballFullpath, '--enable-pnp'] : [tarballFullpath],
-                { env: globalInstallEnv },
-              );
+              await exec.exec('yarn global add', [tarballFullpath], {
+                env: globalInstallEnv,
+              });
             } else {
               // TODO: Run this command using the local npm registry (e.g. local-npm or verdaccio)
               await exec.exec(
