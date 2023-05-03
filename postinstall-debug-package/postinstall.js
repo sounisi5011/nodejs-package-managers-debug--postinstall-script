@@ -261,6 +261,10 @@ async function getEnvAddedByPackageManager(
 }
 
 (async () => {
+  console.log(
+    `Start postinstall${postinstallType ? ` (${postinstallType})` : ''}`,
+  );
+
   const cwd = process.cwd();
   const pkg = await readFile(path.resolve(__dirname, 'package.json'), 'utf8')
     .then((v) => JSON.parse(v))
@@ -324,8 +328,6 @@ async function getEnvAddedByPackageManager(
       prefixesToCompareRecord: expectedValues,
     }),
   };
-  if (postinstallType) console.log(postinstallType);
-  console.log(debugData);
 
   const {
     GITHUB_STEP_SUMMARY,
@@ -367,6 +369,10 @@ async function getEnvAddedByPackageManager(
        */
       await appendFile(DEBUG_DATA_JSON_LINES_PATH, `\n${jsonStr}\n`);
   }
+
+  console.log(
+    `Finish postinstall${postinstallType ? ` (${postinstallType})` : ''}`,
+  );
 })().catch((error) => {
   if (!process.exitCode) process.exitCode = 1;
   console.error(error);
