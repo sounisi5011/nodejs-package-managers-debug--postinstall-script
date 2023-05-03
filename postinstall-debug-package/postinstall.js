@@ -3,6 +3,7 @@ const { appendFile, readdir, readFile, writeFile } = require('fs/promises');
 const path = require('path');
 const { inspect, promisify } = require('util');
 
+const ansiColors = require('ansi-colors');
 const usedPM = require('used-pm');
 
 const execAsync = promisify(exec);
@@ -261,8 +262,11 @@ async function getEnvAddedByPackageManager(
 }
 
 (async () => {
+  ansiColors.enabled = true;
   console.log(
-    `Start postinstall${postinstallType ? ` (${postinstallType})` : ''}`,
+    ansiColors.green(
+      `Start postinstall${postinstallType ? ` (${postinstallType})` : ''}`,
+    ),
   );
 
   const cwd = process.cwd();
@@ -371,7 +375,9 @@ async function getEnvAddedByPackageManager(
   }
 
   console.log(
-    `Finish postinstall${postinstallType ? ` (${postinstallType})` : ''}`,
+    ansiColors.green(
+      `Finish postinstall${postinstallType ? ` (${postinstallType})` : ''}`,
+    ),
   );
 })().catch((error) => {
   if (!process.exitCode) process.exitCode = 1;
