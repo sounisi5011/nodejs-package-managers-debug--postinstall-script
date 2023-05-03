@@ -265,7 +265,7 @@ async function getEnvAddedByPackageManager(
   ansiColors.enabled = true;
   console.log(
     ansiColors.green(
-      `Start postinstall${postinstallType ? ` (${postinstallType})` : ''}`,
+      `Start postinstall${postinstallType ? ` / ${postinstallType}` : ''}`,
     ),
   );
 
@@ -376,7 +376,7 @@ async function getEnvAddedByPackageManager(
 
   console.log(
     ansiColors.green(
-      `Finish postinstall${postinstallType ? ` (${postinstallType})` : ''}`,
+      `Finish postinstall${postinstallType ? ` / ${postinstallType}` : ''}`,
     ),
   );
 })().catch((error) => {
