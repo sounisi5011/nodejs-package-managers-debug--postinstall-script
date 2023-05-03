@@ -586,7 +586,10 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
 
       const localInstallEnv = Object.assign({}, installEnv, {
         POSTINSTALL_TYPE: `Local Dependencies (${caseName})`,
-        DEBUG_EXPECTED_LOCAL_PREFIX: expectedLocalPrefix,
+        DEBUG_EXPECTED_VARS_JSON: JSON.stringify({
+          expectedPnPEnabled: pnp,
+          expectedLocalPrefix,
+        }),
       });
       await fs.writeFile(
         localInstallEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
@@ -886,6 +889,9 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
 
         Object.assign(globalInstallEnv, {
           POSTINSTALL_TYPE: `Global Dependencies${labelSuffix}`,
+          DEBUG_EXPECTED_VARS_JSON: JSON.stringify({
+            expectedPnPEnabled: pnp,
+          }),
         });
         await fs.writeFile(
           globalInstallEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
