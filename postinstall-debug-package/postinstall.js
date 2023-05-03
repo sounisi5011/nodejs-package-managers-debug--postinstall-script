@@ -155,7 +155,7 @@ async function execPackageManagerCommand(commandAndArgs) {
  * @param {NodeJS.ProcessEnv} env
  * @param {object} [options]
  * @param {string} [options.cwd]
- * @param {Record<string, string | null | undefined>} [options.prefixesToCompareRecord]
+ * @param {Record<string, unknown>} [options.prefixesToCompareRecord]
  * @returns {Promise<NodeJS.ProcessEnv>}
  */
 async function getEnvAddedByPackageManager(
@@ -314,15 +314,16 @@ async function getEnvAddedByPackageManager(
       )
     : undefined;
 
-  const expectedValues = Object.fromEntries(
-    Object.entries({
-      expectedLocalPrefix: process.env.DEBUG_EXPECTED_LOCAL_PREFIX,
-    }).filter(([, value]) => value !== undefined),
+  /** @type {Readonly<Record<string, unknown>>} */
+  const expectedValues = JSON.parse(
+    process.env.DEBUG_EXPECTED_VARS_JSON || '{}',
   );
   const debugData = {
     cwd,
     ...expectedValues,
     isGlobalMode,
+    // see https://yarnpkg.com/advanced/pnpapi#processversionspnp
+    pnpVersion: process.versions.pnp,
     realBin: binFilepathList,
     ...(binCommand?.args
       ? { [binCommand.args.join(' ')]: binCommandResult }
@@ -372,6 +373,17 @@ async function getEnvAddedByPackageManager(
        * @see https://jsonlines.org/
        */
       await appendFile(DEBUG_DATA_JSON_LINES_PATH, `\n${jsonStr}\n`);
+  }
+
+  const { expectedPnPEnabled } = expectedValues;
+  if (typeof expectedPnPEnabled === 'boolean') {
+    // see https://yarnpkg.com/advanced/pnpapi#processversionspnp
+    const isPnPEnabled = process.versions.pnp !== undefined;
+    if (isPnPEnabled !== expectedPnPEnabled) {
+      throw new Error(
+        `Plug'n'Play is not ${expectedPnPEnabled ? 'enabled' : 'disabled'}`,
+      );
+    }
   }
 
   console.log(

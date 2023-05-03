@@ -1,5 +1,7 @@
 // @ts-check
 
+const semverLte = require('semver/functions/lte');
+
 const BIN_NAME = 'bar';
 
 /**
@@ -71,8 +73,9 @@ function updatePathEnv(env, updateFn) {
  * @param {import('@actions/exec')} args.exec
  * @param {typeof require} args.require
  * @param {string} args.packageManager
+ * @param {boolean} args.pnp
  */
-module.exports = async ({ core, io, exec, require, packageManager }) => {
+module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
   const fs = require('fs/promises');
   const os = require('os');
   const path = require('path');
@@ -355,24 +358,39 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
   );
 
   const pmType = packageManager.replace(/@.+$/s, '');
+  const pmVersion = packageManager.substring(pmType.length + 1);
   await core.group('Show node and package manager version', async () => {
     await exec.exec('node --version', [], { env: defaultEnv });
     await exec.exec(pmType, ['--version'], { env: defaultEnv });
   });
 
-  const isYarnBerry =
-    pmType === 'yarn' && !packageManager.startsWith('yarn@1.');
+  const isYarnBerry = pmType === 'yarn' && !pmVersion.startsWith('1.');
   const tmpDirpath = await fs.mkdtemp(os.tmpdir() + path.sep);
   const installEnv = {
     ...defaultEnv,
     DEBUG_DATA_JSON_LINES_PATH: path.join(tmpDirpath, 'debug-data.jsonl'),
     DEBUG_ORIGINAL_ENV_JSON_PATH: path.join(tmpDirpath, 'orig-env.json'),
   };
+  if (pnp) {
+    // see https://github.com/pnpm/pnpm/blob/v5.9.0/packages/pnpm/CHANGELOG.md#590
+    if (pmType === 'pnpm' && semverLte('5.9.0', pmVersion)) {
+      // see https://pnpm.io/npmrc#node-linker
+      await exec.exec('pnpm config set node-linker pnp');
+    } else if (pmType !== 'yarn') {
+      throw new Error(`${packageManager} does not support Plug'n'Play`);
+    }
+  } else {
+    if (isYarnBerry) {
+      // see https://yarnpkg.com/configuration/yarnrc#nodeLinker
+      await exec.exec('yarn config set nodeLinker node-modules');
+    }
+  }
+
   /**
    * @type {(options: { pkgJson: Record<string, unknown> }) => Promise<{ packageDirpath: string } | null>}
    */
   const setupWorkspaces = async ({ pkgJson }) => {
-    if (/^npm@[0-6]\./.test(packageManager)) return null;
+    if (pmType === 'npm' && /^[0-6]\./.test(pmVersion)) return null;
 
     const cwd = process.cwd();
     const packageDir = 'packages/hoge';
@@ -540,10 +558,20 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
         },
       };
       await fs.copyFile(postinstallFullpath, './postinstall.js');
-      if (isYarnBerry) {
-        await fs.writeFile('yarn.lock', new Uint8Array(0));
-        // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
-        await fs.writeFile('.yarnrc.yml', 'enableImmutableInstalls: false');
+      if (pmType === 'yarn') {
+        if (isYarnBerry) {
+          await fs.writeFile('yarn.lock', new Uint8Array(0));
+          // see https://github.com/yarnpkg/berry/discussions/3486#discussioncomment-1379344
+          await fs.writeFile('.yarnrc.yml', 'enableImmutableInstalls: false');
+        } else {
+          if (pnp) {
+            // see https://classic.yarnpkg.com/en/docs/pnp/getting-started
+            // see https://github.com/yarnpkg/yarn/pull/6382
+            pkgJson.installConfig = {
+              pnp: true,
+            };
+          }
+        }
       }
       if (pmType === 'pnpm') {
         // pnpm v7 will not run the "postinstall" script if the dependency is already cached.
@@ -559,7 +587,10 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
 
       const localInstallEnv = Object.assign({}, installEnv, {
         POSTINSTALL_TYPE: `Local Dependencies (${caseName})`,
-        DEBUG_EXPECTED_LOCAL_PREFIX: expectedLocalPrefix,
+        DEBUG_EXPECTED_VARS_JSON: JSON.stringify({
+          expectedPnPEnabled: pnp,
+          expectedLocalPrefix,
+        }),
       });
       await fs.writeFile(
         localInstallEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
@@ -586,7 +617,7 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
               env: localInstallEnv,
             });
           } else if (pmType === 'yarn') {
-            if (packageManager.startsWith('yarn@1.')) {
+            if (pmVersion.startsWith('1.')) {
               await exec.exec(
                 'yarn add',
                 isWorkspacesProjectRoot
@@ -859,7 +890,14 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
 
         Object.assign(globalInstallEnv, {
           POSTINSTALL_TYPE: `Global Dependencies${labelSuffix}`,
+          DEBUG_EXPECTED_VARS_JSON: JSON.stringify({
+            expectedPnPEnabled: pnp,
+          }),
         });
+        if (pmType === 'yarn' && !isYarnBerry && pnp) {
+          // see https://github.com/yarnpkg/yarn/pull/6382
+          globalInstallEnv.YARN_PLUGNPLAY_OVERRIDE = '1';
+        }
         await fs.writeFile(
           globalInstallEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
           JSON.stringify(globalInstallEnv, (_, value) =>
@@ -889,7 +927,7 @@ module.exports = async ({ core, io, exec, require, packageManager }) => {
               env: globalInstallEnv,
             });
           } else if (pmType === 'yarn') {
-            if (packageManager.startsWith('yarn@1.')) {
+            if (pmVersion.startsWith('1.')) {
               await exec.exec('yarn global add', [tarballFullpath], {
                 env: globalInstallEnv,
               });

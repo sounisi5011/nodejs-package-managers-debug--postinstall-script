@@ -159,9 +159,24 @@ jobs:
           - pnpm@7.32.0
           - pnpm@8.2.0
           - bun@0.5.9
+        pnp: [false, true]
         exclude:
           - package-manager: bun@0.5.9
             os: windows-latest
+          - package-manager: npm@6.14.18
+            pnp: true
+          - package-manager: npm@7.24.2
+            pnp: true
+          - package-manager: npm@8.19.4
+            pnp: true
+          - package-manager: npm@9.6.4
+            pnp: true
+          - package-manager: bun@0.5.9
+            pnp: true
+          # Plug'n'Play cannot be enabled in Yarn v1 on Windows
+          - package-manager: yarn@1.22.19
+            os: windows-latest
+            pnp: true
     runs-on: ${{ matrix.os }}
     steps:
       - name: Download debug package
@@ -223,6 +238,7 @@ jobs:
               require,
               __original_require__,
               packageManager: '${{ matrix.package-manager }}',
+              pnp: ${{ matrix.pnp }},
             });
 
   # Successfully complete this job when all jobs have been completed.
