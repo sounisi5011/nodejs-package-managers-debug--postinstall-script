@@ -550,6 +550,9 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
       process.chdir(await fs.mkdtemp(origCWD + path.sep));
       const projectRootPath = process.cwd();
 
+      const localInstallEnv = Object.assign({}, installEnv, {
+        POSTINSTALL_TYPE: `Local Dependencies (${caseName})`,
+      });
       const pkgJsonPath = path.resolve('package.json');
       const shellQuotChar = process.platform === 'win32' ? `"` : `'`;
       const pkgJson = {
@@ -567,9 +570,13 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
           if (pnp) {
             // see https://classic.yarnpkg.com/en/docs/pnp/getting-started
             // see https://github.com/yarnpkg/yarn/pull/6382
-            pkgJson.installConfig = {
-              pnp: true,
-            };
+            if (process.platform === 'win32') {
+              localInstallEnv.YARN_PLUGNPLAY_OVERRIDE = '1';
+            } else {
+              pkgJson.installConfig = {
+                pnp: true,
+              };
+            }
           }
         }
       }
@@ -585,12 +592,9 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
       const { expectedLocalPrefix } = setupResult;
       await fs.writeFile(pkgJsonPath, JSON.stringify(pkgJson));
 
-      const localInstallEnv = Object.assign({}, installEnv, {
-        POSTINSTALL_TYPE: `Local Dependencies (${caseName})`,
-        DEBUG_EXPECTED_VARS_JSON: JSON.stringify({
-          expectedPnPEnabled: pnp,
-          expectedLocalPrefix,
-        }),
+      localInstallEnv.DEBUG_EXPECTED_VARS_JSON = JSON.stringify({
+        expectedPnPEnabled: pnp,
+        expectedLocalPrefix,
       });
       await fs.writeFile(
         localInstallEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
