@@ -1,26 +1,29 @@
-// @ts-check
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { inspect } from 'node:util';
 
-const semverLte = require('semver/functions/lte');
+import semverLte from 'semver/functions/lte';
+
+import type * as ActionsCore from '@actions/core';
+import type * as ActionsIo from '@actions/io';
+import type * as ActionsExec from '@actions/exec';
 
 const BIN_NAME = 'bar';
 
-/**
- * @template {readonly unknown[]} T
- * @template U
- * @param {T} array
- * @param {U} defaultItem
- * @returns {T | [U]}
- */
-function defaultItemIfEmptyArray(array, defaultItem) {
+function defaultItemIfEmptyArray<T extends readonly unknown[], U>(
+  array: T,
+  defaultItem: U,
+): T | [U] {
   return 0 < array.length ? array : [defaultItem];
 }
 
-/**
- * @param {string} name
- * @param {Record<string, Record<string, string | undefined>>} [envObj]
- * @returns {string}
- */
-function getRequiredEnv(name, envObj) {
+function getRequiredEnv(
+  name: string,
+  envObj?: Readonly<
+    Record<string, Readonly<Record<string, string | undefined>>>
+  >,
+): string {
   const [envVarName, env] = Object.entries(envObj ?? {})[0] ?? [
     'process.env',
     process.env,
@@ -34,11 +37,10 @@ function getRequiredEnv(name, envObj) {
   return value;
 }
 
-/**
- * @param {Record<string, string | undefined>} env
- * @param {string} name
- */
-function getWinEnv(env, name) {
+function getWinEnv(
+  env: Readonly<Record<string, string | undefined>>,
+  name: string,
+): string | undefined {
   const value = env[name];
   if (value !== undefined) return value;
 
@@ -46,12 +48,10 @@ function getWinEnv(env, name) {
   return Object.entries(env).find(([key]) => regexp.test(key))?.[1];
 }
 
-/**
- * @param {Readonly<Record<string, string | undefined>>} env
- * @param {(value: string | undefined, name: string) => string | undefined} updateFn
- * @returns {Record<string, string | undefined>}
- */
-function updatePathEnv(env, updateFn) {
+function updatePathEnv<T extends string | undefined>(
+  env: Readonly<Record<string, T>>,
+  updateFn: (value: T, name: string) => T,
+): Record<string, T> {
   const isWindows = process.platform === 'win32';
 
   const existentNameList = isWindows
@@ -66,27 +66,28 @@ function updatePathEnv(env, updateFn) {
   return updatedEnv;
 }
 
-/**
- * @param {object} args
- * @param {import('@actions/core')} args.core
- * @param {import('@actions/io')} args.io
- * @param {import('@actions/exec')} args.exec
- * @param {typeof require} args.require
- * @param {string} args.packageManager
- * @param {boolean} args.pnp
- */
-module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
-  const fs = require('fs/promises');
-  const os = require('os');
-  const path = require('path');
-  const { inspect } = require('util');
+interface DebugDataFromPostinstall {
+  readonly postinstallType: string | null;
+  readonly cwd: string;
+  readonly binCommand: {
+    readonly args: readonly string[];
+    readonly result: string | null;
+  } | null;
+  readonly isGlobalMode: boolean;
+  readonly binName: string | null;
+  readonly env: Readonly<Record<string, string | null>>;
+}
 
-  /**
-   * @param {string} target
-   * @param {string} parent
-   * @returns {boolean}
-   */
-  function pathStartsWith(target, parent) {
+interface MainArgs {
+  core: typeof ActionsCore;
+  io: typeof ActionsIo;
+  exec: typeof ActionsExec;
+  packageManager: string;
+  pnp: boolean;
+}
+
+module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
+  function pathStartsWith(target: string, parent: string): boolean {
     target = path.normalize(target);
     parent = path.normalize(parent);
 
@@ -97,13 +98,11 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
     );
   }
 
-  /**
-   * @param {string} dirpath
-   * @param {unknown} _
-   * @param {readonly string[]} dirpathList
-   * @returns {boolean}
-   */
-  function excludeDuplicateParentDir(dirpath, _, dirpathList) {
+  function excludeDuplicateParentDir(
+    dirpath: string,
+    _: unknown,
+    dirpathList: readonly string[],
+  ): boolean {
     return !dirpathList.some(
       (dirpathItem) =>
         dirpathItem !== dirpath && pathStartsWith(dirpath, dirpathItem),
@@ -111,9 +110,6 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
   }
 
   /**
-   * @param {string} target
-   * @param {string} parent
-   * @param {number} level
    * @example
    * toSubdirPath('/foo/bar/baz/qux', '/foo', 1)     // => '/foo/bar'
    * toSubdirPath('/foo/bar/baz/qux', '/foo', 2)     // => '/foo/bar/baz'
@@ -121,7 +117,7 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
    * toSubdirPath('/foo/bar/baz/qux', '/foo/bar', 1) // => '/foo/bar/baz'
    * toSubdirPath('/foo/bar/baz/qux', '/foo/bar', 2) // => '/foo/bar/baz/qux'
    */
-  function toSubdirPath(target, parent, level) {
+  function toSubdirPath(target: string, parent: string, level: number): string {
     if (!pathStartsWith(target, parent)) return target;
 
     const parentDirLevel = parent.split(path.sep).length;
@@ -131,7 +127,15 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
       .join(path.sep);
   }
 
-  function insertHeader(headerStr, lineList, linePrefix) {
+  function insertHeader(
+    headerStr: string,
+    lineList: readonly string[],
+    linePrefix:
+      | string
+      | ((
+          ...args: Parameters<Parameters<(readonly string[])['map']>[0]>
+        ) => string),
+  ): string[] {
     if (lineList.length < 1) return [];
     return [
       headerStr,
@@ -147,7 +151,7 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
   /**
    * @see https://jsonlines.org/
    */
-  function parseJsonLines(jsonLinesText) {
+  function parseJsonLines(jsonLinesText: string): unknown[] {
     let valueCount = 0;
     return jsonLinesText.split('\n').flatMap((jsonText, index) => {
       // see https://www.rfc-editor.org/rfc/rfc8259#section-2:~:text=ws%20=,carriage%20return
@@ -155,14 +159,18 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
       valueCount++;
 
       try {
-        return [JSON.parse(jsonText)];
+        return [JSON.parse(jsonText) as unknown];
       } catch (error) {
         error.message += ` in line ${index + 1} (value ${valueCount})`;
         throw error;
       }
     });
   }
-  function indentStr(str, prefix, firstPrefix = '') {
+  function indentStr(
+    str: string,
+    prefix: string | number,
+    firstPrefix: string = '',
+  ): string {
     if (typeof prefix !== 'number' && typeof prefix !== 'string')
       prefix = String(prefix);
     if (typeof firstPrefix !== 'string') firstPrefix = String(firstPrefix);
@@ -183,7 +191,15 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
       offset === 0 ? firstPrefixStr : prefixStr,
     );
   }
-  function filepathUsingEnvNameList(filepath, env, excludeEnv = {}) {
+  function filepathUsingEnvNameList(
+    filepath: string,
+    env: Readonly<Record<string, string | null | undefined>> | null | undefined,
+    excludeEnv: Readonly<Record<string, string | undefined>> = {},
+  ): {
+    envName: string;
+    path: string;
+    rawPath: string;
+  }[] {
     return Object.entries(env ?? {}).flatMap(([key, value]) => {
       if (
         !value ||
@@ -215,7 +231,7 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
       return [];
     });
   }
-  function yarnBerryAcceptsFullpath(absolutePath) {
+  function yarnBerryAcceptsFullpath(absolutePath: string): string {
     absolutePath = path.resolve(absolutePath);
     if (process.platform === 'win32') {
       // Remove Windows drive letter and replace path separator with slash
@@ -224,20 +240,20 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
     return absolutePath;
   }
 
-  /**
-   * @template T
-   * @param {object} args
-   * @param {string | Iterable<string>} args.rootDirpaths
-   * @param {string} args.binName
-   * @param {boolean} [args.isGlobal]
-   * @param {string} args.fdCmdFullpath
-   * @param {() => Promise<T>} installFn
-   * @returns {Promise<{ result: T, executablesFilepathList: string[] }>}
-   */
-  async function findInstalledNpmExecutables(
-    { rootDirpaths, binName, isGlobal = false, fdCmdFullpath },
-    installFn,
-  ) {
+  async function findInstalledNpmExecutables<T>(
+    {
+      rootDirpaths,
+      binName,
+      isGlobal = false,
+      fdCmdFullpath,
+    }: {
+      rootDirpaths: string | Iterable<string>;
+      binName: string;
+      isGlobal?: boolean;
+      fdCmdFullpath: string;
+    },
+    installFn: () => Promise<T>,
+  ): Promise<{ result: T; executablesFilepathList: string[] }> {
     const rootDirpathList = [
       ...new Set(
         (typeof rootDirpaths === 'string'
@@ -289,14 +305,18 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
     'Move debugger package tarball',
     async () => {
       const rootDir = path.resolve(process.cwd(), '/');
-      const dirList = [rootDir, os.homedir(), process.env.RUNNER_TEMP_DIR];
+      const dirList = [
+        rootDir,
+        os.homedir(),
+        getRequiredEnv('RUNNER_TEMP_DIR'),
+      ];
       const tarballPathList = dirList
         .map((dir) => path.resolve(dir, 'debugger-package.tgz'))
         // Exclude paths that belong to different drive letters
         .filter((filepath) => filepath.startsWith(rootDir))
         // Sort by shortest filepath
         .sort((a, b) => a.length - b.length);
-      const origTarballPath = path.resolve(process.env.TARBALL_PATH);
+      const origTarballPath = path.resolve(getRequiredEnv('TARBALL_PATH'));
       console.log({
         origTarballPath,
         tarballPathList,
@@ -348,12 +368,14 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
 
   const postinstallFullpath = path.resolve('postinstall.js');
 
-  const defaultEnv = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key]) =>
-        !/^(?:DISABLE_)?(?:npm_|yarn_|PNPM_|BUN_)|^(?:INIT_CWD|PROJECT_CWD)$/i.test(
-          key,
-        ),
+  const defaultEnv: Readonly<Record<string, string>> = Object.fromEntries(
+    Object.entries(process.env).flatMap(([key, value]) =>
+      typeof value === 'string' &&
+      !/^(?:DISABLE_)?(?:npm_|yarn_|PNPM_|BUN_)|^(?:INIT_CWD|PROJECT_CWD)$/i.test(
+        key,
+      )
+        ? [[key, value]]
+        : [],
     ),
   );
 
@@ -366,11 +388,10 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
 
   const isYarnBerry = pmType === 'yarn' && !pmVersion.startsWith('1.');
   const tmpDirpath = await fs.mkdtemp(os.tmpdir() + path.sep);
-  const installEnv = {
-    ...defaultEnv,
+  const installEnv = Object.assign({}, defaultEnv, {
     DEBUG_DATA_JSON_LINES_PATH: path.join(tmpDirpath, 'debug-data.jsonl'),
     DEBUG_ORIGINAL_ENV_JSON_PATH: path.join(tmpDirpath, 'orig-env.json'),
-  };
+  });
   if (pnp) {
     // see https://github.com/pnpm/pnpm/blob/v5.9.0/packages/pnpm/CHANGELOG.md#590
     if (pmType === 'pnpm' && semverLte('5.9.0', pmVersion)) {
@@ -386,10 +407,11 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
     }
   }
 
-  /**
-   * @type {(options: { pkgJson: Record<string, unknown> }) => Promise<{ packageDirpath: string } | null>}
-   */
-  const setupWorkspaces = async ({ pkgJson }) => {
+  const setupWorkspaces = async ({
+    pkgJson,
+  }: {
+    pkgJson: Record<string, unknown>;
+  }): Promise<{ packageDirpath: string } | null> => {
     if (pmType === 'npm' && /^[0-6]\./.test(pmVersion)) return null;
 
     const cwd = process.cwd();
@@ -455,13 +477,15 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
     );
     return { packageDirpath };
   };
-  /**
-   * @type {Record<string, {
-   *   setup: (options: { pkgJson: Record<string, unknown> }) => Promise<{ expectedLocalPrefix: string } | null>,
-   *   isWorkspacesProjectRoot?: true,
-   * }>}
-   */
-  const localInstallCases = {
+  const localInstallCases: Record<
+    string,
+    {
+      setup: (options: {
+        pkgJson: Record<string, unknown>;
+      }) => Promise<{ expectedLocalPrefix: string } | null>;
+      isWorkspacesProjectRoot?: true;
+    }
+  > = {
     '`package.json` exists in the same directory': {
       async setup() {
         return {
@@ -552,7 +576,7 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
 
       const pkgJsonPath = path.resolve('package.json');
       const shellQuotChar = process.platform === 'win32' ? `"` : `'`;
-      const pkgJson = {
+      const pkgJson: Record<string, unknown> = {
         scripts: {
           postinstall: `node ./postinstall.js --type=${shellQuotChar}Project Root (${caseName})${shellQuotChar}`,
         },
@@ -653,9 +677,13 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
     await core.group(
       `Add a list of installed executables to the Job Summary (${caseName})`,
       async () => {
+        const GITHUB_STEP_SUMMARY = getRequiredEnv('GITHUB_STEP_SUMMARY', {
+          localInstallEnv,
+        });
+
         if (installedExecutables.length < 1) {
           await fs.appendFile(
-            localInstallEnv.GITHUB_STEP_SUMMARY,
+            GITHUB_STEP_SUMMARY,
             [
               '*No executables created in `node_modules/.bin` directory.*',
               '',
@@ -672,23 +700,26 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
           .readFile(localInstallEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
           .then(parseJsonLines)
           .then(
-            (debugDataList) =>
-              debugDataList.find(
+            (
+              debugDataList,
+            ): DebugDataFromPostinstall | Partial<DebugDataFromPostinstall> =>
+              (debugDataList as unknown as DebugDataFromPostinstall[]).find(
                 ({ postinstallType }) =>
                   postinstallType === localInstallEnv.POSTINSTALL_TYPE,
               ) ??
               // Bun does not execute the "postinstall" script of installed dependencies.
               // Instead, it uses the debug data from the project's "postinstall" script.
-              debugDataList.find(
+              (debugDataList as unknown as DebugDataFromPostinstall[]).find(
                 ({ postinstallType }) =>
                   pmType === 'bun' &&
+                  postinstallType &&
                   /^(?:Project|Package)\b/i.test(postinstallType),
               ) ??
               {},
           )
-          .catch(() => ({}));
+          .catch(() => ({} as Partial<DebugDataFromPostinstall>));
         await fs.appendFile(
-          localInstallEnv.GITHUB_STEP_SUMMARY,
+          GITHUB_STEP_SUMMARY,
           [
             '```js',
             await Promise.all(
@@ -718,8 +749,7 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
   }
   process.chdir(origCWD);
 
-  /** @type {readonly string[]} */
-  const rootDirpathList = await (async () => {
+  const rootDirpathList: readonly string[] = await (async () => {
     if (process.platform !== 'win32') return ['/'];
 
     // see https://stackoverflow.com/a/52411712
@@ -767,10 +797,8 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
         ?.split(path.delimiter)
         .filter((pathValue) => /node|npm/i.test(pathValue)) ?? [];
 
-    /** @type {Set<string>} */
-    const programFilesDirSet = new Set();
-    /** @type {Set<string>} */
-    const binDirSet = new Set([
+    const programFilesDirSet = new Set<string>();
+    const binDirSet = new Set<string>([
       // see https://github.com/actions/runner-images/blob/0b558a470e1e916e0d3e1e020a216ffdde1810e7/images/win/scripts/Installers/Install-NodeLts.ps1#L7-L8
       String.raw`C:\npm`,
     ]);
@@ -805,13 +833,15 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
         : rootDirpath;
     });
   })();
-  /**
-   * @type {Record<string, {
-   *   setup: (options: { env: Readonly<typeof process.env> }) => Promise<{ env: typeof process.env }>,
-   *   cleanup?: () => Promise<void>,
-   * }>}
-   */
-  const globalInstallCases = {
+  const globalInstallCases: Record<
+    string,
+    {
+      setup: (options: {
+        env: Readonly<Record<string, string>>;
+      }) => Promise<{ env: Record<string, string> }>;
+      cleanup?: () => Promise<void>;
+    }
+  > = {
     ...(pmType === 'pnpm'
       ? // The "pnpm add --global ..." command requires a global bin directory.
         // see https://github.com/pnpm/pnpm/issues/4658
@@ -886,7 +916,7 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
       async () => {
         const { env: globalInstallEnv } = caseItem
           ? await caseItem[1].setup({ env: installEnv })
-          : { env: installEnv };
+          : { env: { ...installEnv } };
 
         Object.assign(globalInstallEnv, {
           POSTINSTALL_TYPE: `Global Dependencies${labelSuffix}`,
@@ -899,13 +929,13 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
           globalInstallEnv.YARN_PLUGNPLAY_OVERRIDE = '1';
         }
         await fs.writeFile(
-          globalInstallEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
+          getRequiredEnv('DEBUG_ORIGINAL_ENV_JSON_PATH', { globalInstallEnv }),
           JSON.stringify(globalInstallEnv, (_, value) =>
             value === undefined ? null : value,
           ),
         );
         await fs.writeFile(
-          globalInstallEnv.DEBUG_DATA_JSON_LINES_PATH,
+          getRequiredEnv('DEBUG_DATA_JSON_LINES_PATH', { globalInstallEnv }),
           new Uint8Array(0),
         );
 
@@ -959,36 +989,42 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
     await core.group(
       `Add a list of installed executables to the Job Summary${labelSuffix}`,
       async () => {
-        const { GITHUB_STEP_SUMMARY } = defaultEnv;
+        const GITHUB_STEP_SUMMARY = getRequiredEnv('GITHUB_STEP_SUMMARY', {
+          globalInstallEnv,
+        });
         const binDirSet = new Set(
           installedExecutables.map((filepath) => path.dirname(filepath)),
         );
 
-        const debugDataList = await fs
-          .readFile(globalInstallEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
+        const debugDataList = (await fs
+          .readFile(
+            getRequiredEnv('DEBUG_DATA_JSON_LINES_PATH', { globalInstallEnv }),
+            'utf8',
+          )
           .then(parseJsonLines)
           .catch((error) => {
             if (error.code === 'ENOENT') return [];
             throw error;
-          });
+          })) as DebugDataFromPostinstall[];
         const { binCommand, ...debugData } =
           debugDataList.find(
             ({ postinstallType }) =>
-              postinstallType === globalInstallEnv.POSTINSTALL_TYPE,
-          ) ?? {};
+              postinstallType ===
+              getRequiredEnv('POSTINSTALL_TYPE', { globalInstallEnv }),
+          ) ?? ({} as Partial<DebugDataFromPostinstall>);
         async function inspectInstalledBin(bindirPath) {
           return await fs
             .readdir(bindirPath)
             .then((files) => {
-              const { binFiles = [], otherFiles = [] } = files.reduce(
-                ({ binFiles = [], otherFiles = [] }, file) => {
-                  const isInstalledBin =
-                    file === BIN_NAME || file.startsWith(`${BIN_NAME}.`);
-                  (isInstalledBin ? binFiles : otherFiles).push(file);
-                  return { binFiles, otherFiles };
-                },
-                {},
-              );
+              const { binFiles = [], otherFiles = [] } = files.reduce<{
+                binFiles?: string[];
+                otherFiles?: string[];
+              }>(({ binFiles = [], otherFiles = [] }, file) => {
+                const isInstalledBin =
+                  file === BIN_NAME || file.startsWith(`${BIN_NAME}.`);
+                (isInstalledBin ? binFiles : otherFiles).push(file);
+                return { binFiles, otherFiles };
+              }, {});
               return inspect(binFiles.concat(otherFiles), {
                 maxArrayLength: binFiles.length,
               });
@@ -996,8 +1032,7 @@ module.exports = async ({ core, io, exec, require, packageManager, pnp }) => {
             .catch((error) => inspect(error));
         }
 
-        /** @type {Map<string, string>} */
-        const binCommandMap = new Map();
+        const binCommandMap = new Map<string, string>();
         if (binCommand?.result) {
           binCommandMap.set(binCommand.args.join(' '), binCommand.result);
         } else if (pmType === 'bun') {
