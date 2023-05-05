@@ -2,7 +2,8 @@
   "private": true,
   "scripts": {
     "build": "node ./build.mjs",
-    "fmt": "prettier --write '**/*'"
+    "fmt": "prettier --write '**/*'",
+    "type-check": "lefthook run type-check"
   },
   "dependencies": {
     "ansi-colors": "4.1.3",
