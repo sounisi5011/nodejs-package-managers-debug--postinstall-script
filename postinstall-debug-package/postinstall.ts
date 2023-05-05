@@ -124,6 +124,16 @@ async function getEnvAddedByPackageManager(
   );
 }
 
+function validateUtils(expected: { isPnPEnabled: unknown }): void {
+  if (typeof expected.isPnPEnabled === 'boolean') {
+    if (isPnPEnabled !== expected.isPnPEnabled) {
+      throw new Error(
+        `Plug'n'Play is not ${expected.isPnPEnabled ? 'enabled' : 'disabled'}`,
+      );
+    }
+  }
+}
+
 (async () => {
   ansiColors.enabled = true;
   console.log(
@@ -230,14 +240,9 @@ async function getEnvAddedByPackageManager(
       await appendFile(DEBUG_DATA_JSON_LINES_PATH, `\n${jsonStr}\n`);
   }
 
-  const { expectedPnPEnabled } = expectedValues;
-  if (typeof expectedPnPEnabled === 'boolean') {
-    if (isPnPEnabled !== expectedPnPEnabled) {
-      throw new Error(
-        `Plug'n'Play is not ${expectedPnPEnabled ? 'enabled' : 'disabled'}`,
-      );
-    }
-  }
+  validateUtils({
+    isPnPEnabled: expectedValues['expectedPnPEnabled'],
+  });
 
   console.log(
     ansiColors.green(
