@@ -1,14 +1,14 @@
-import { exec, execFile } from 'child_process';
-import { appendFile, readdir, readFile, writeFile } from 'fs/promises';
+import { appendFile, readFile, writeFile } from 'fs/promises';
 import * as path from 'path';
-import { inspect, promisify } from 'util';
+import { inspect } from 'util';
 import type { InspectOptions } from 'util';
 
 import ansiColors from 'ansi-colors';
-import usedPM from 'used-pm';
 
-const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
+import { isGlobalMode } from './utils/is-global-mode';
+import { isPnPEnabled } from './utils/is-pnp-enabled';
+import { execBinCmd } from './utils/exec-bin-cmd';
+import { findInstalledExecutables } from './utils/find-installed-executables';
 
 /**
  * @see https://nodejs.org/api/util.html#custom-inspection-functions-on-objects
@@ -20,140 +20,10 @@ type CustomInspectFunction<TThis = unknown> = (
   _inspect: typeof inspect,
 ) => string;
 
-const packageManager = usedPM();
-
-let isGlobalMode = false;
-// In npm and pnpm, global mode can be detected by reading the "npm_config_global" environment variable.
-// Older npm defines this for local mode as well, so make sure it is equal to "'true'".
-if (process.env['npm_config_global'] === 'true') {
-  isGlobalMode = true;
-}
-// In Yarn v1, global mode can be detected by reading the "npm_config_argv" environment variable.
-// This value is a JSON string containing the original arguments passed to the "yarn" command.
-// It is parsed to check if the called subcommand is "yarn global add".
-const isYarn1 =
-  packageManager?.name === 'yarn' && packageManager.version.startsWith('1.');
-if (isYarn1 && process.env['npm_config_argv']) {
-  const npmArgv = JSON.parse(process.env['npm_config_argv']);
-  if (Array.isArray(npmArgv?.original)) {
-    // Arguments include options.
-    // To ignore them, compare the position of the keywords "global" and "add" to check whether the subcommand is "yarn global add".
-    // Note: Strictly speaking, this logic is incorrect.
-    //       The value of options MUST be ignored.
-    //       For example, if the following command is executed:
-    //           yarn --cache-folder global add ...
-    //       This logic incorrectly determines that this is a "yarn global add" command,
-    //       because it does not know that the "global" keyword is the value of the "--cache-folder" option.
-    const globalPos = npmArgv?.original.indexOf('global');
-    const addPos = npmArgv?.original.indexOf('add');
-    if (0 <= globalPos && globalPos < addPos) {
-      isGlobalMode = true;
-    }
-  }
-}
-// Since Yarn v2, there is no global mode.
-// The "yarn global add" command has been replaced with the "yarn dlx" command.
-// see https://yarnpkg.com/getting-started/migration#use-yarn-dlx-instead-of-yarn-global
-
-async function findBin(
-  cwdList: readonly string[],
-  dirnameList: readonly string[],
-  binName: string,
-): Promise<string[]> {
-  const bindirSet = new Set<string>(
-    cwdList
-      .flatMap((cwd) => {
-        const cwdList: string[] = [];
-        while (true) {
-          cwdList.push(cwd);
-          const parentDir = path.dirname(cwd);
-          if (parentDir === cwd) break;
-          cwd = parentDir;
-        }
-        return cwdList;
-      })
-      .sort()
-      .flatMap((cwd) =>
-        dirnameList.map((dirname) => (dirname ? path.join(cwd, dirname) : cwd)),
-      ),
-  );
-
-  const binFilepathList: string[] = [];
-  for (const bindir of bindirSet) {
-    const filenameList = await readdir(bindir).catch(() => []);
-    binFilepathList.push(
-      ...filenameList
-        .filter(
-          (filename) =>
-            filename === binName || filename.startsWith(`${binName}.`),
-        )
-        .map((filename) => path.join(bindir, filename)),
-    );
-  }
-
-  return binFilepathList;
-}
-
 const postinstallType =
   process.argv
     .map((arg) => /^--type\s*=(.+)$/.exec(arg)?.[1]?.trim())
     .findLast(Boolean) ?? process.env['POSTINSTALL_TYPE'];
-
-async function execPackageManagerCommand(
-  commandAndArgs: readonly [string, ...string[]],
-): Promise<{
-  stdout: string;
-  stderr: string;
-  commandAndArgs: readonly string[];
-}> {
-  const command = commandAndArgs[0];
-  const args = commandAndArgs.slice(1);
-
-  // Sometimes there are multiple versions of a package manager on a user's system, such as when using Corepack.
-  // In this case, the "child_process.execFile()" and "child_process.exec()" functions may call another package manager that is in a different path than the running package manager.
-  // To avoid this, use the environment variable "npm_execpath".
-  //
-  // Note: On Windows, the "child_process.exec()" function cannot execute absolute path commands.
-  //       We need to use the "child_process.execFile()" function instead.
-  //       Therefore, the "child_process.execFile()" function is used here even on Windows.
-  if (process.env['npm_execpath']) {
-    const execpathIsJS = /\.[cm]?js$/.test(
-      path.extname(process.env['npm_execpath']),
-    );
-    const commandAndArgs: [string, ...string[]] = execpathIsJS
-      ? [process.execPath, process.env['npm_execpath'], ...args]
-      : [process.env['npm_execpath'], ...args];
-    const additionalProperties = { commandAndArgs };
-
-    try {
-      return Object.assign(
-        await execFileAsync(commandAndArgs[0], commandAndArgs.slice(1)),
-        additionalProperties,
-      );
-    } catch (error) {
-      throw Object.assign(error ?? {}, additionalProperties);
-    }
-  }
-
-  const additionalProperties = { commandAndArgs };
-  try {
-    return Object.assign(
-      process.platform === 'win32'
-        ? // On Windows, the "child_process.execFile()" function cannot execute commands that are not absolute paths.
-          // We need to use the "child_process.exec()" function instead.
-          //
-          // Note: This is bad code because it does not quote each argument.
-          //       However, this is not a problem because the arguments of the commands executed within this script do not need to be quoted.
-          await execAsync(commandAndArgs.join(' '))
-        : // The "child_process.execFile()" function is more efficient than the "child_process.exec()" function and does not require escaping arguments.
-          // Therefore, it is used on non-Windows platforms.
-          await execFileAsync(command, args),
-      additionalProperties,
-    );
-  } catch (error) {
-    throw Object.assign(error ?? {}, additionalProperties);
-  }
-}
 
 async function getEnvAddedByPackageManager(
   env: NodeJS.ProcessEnv = process.env,
@@ -268,43 +138,28 @@ async function getEnvAddedByPackageManager(
     .catch(() => undefined);
   const binName = Object.keys(pkg?.bin ?? {})[0];
 
-  const binCommandArgs: readonly [string, ...string[]] | null = isYarn1
-    ? isGlobalMode
-      ? ['yarn', 'global', 'bin']
-      : ['yarn', 'bin']
-    : packageManager?.name === 'pnpm'
-    ? isGlobalMode
-      ? ['pnpm', 'bin', '--global']
-      : ['pnpm', 'bin']
-    : packageManager?.name === 'npm'
-    ? isGlobalMode
-      ? ['npm', 'bin', '--global']
-      : ['npm', 'bin']
-    : packageManager?.name === 'bun'
-    ? // see https://bun.sh/docs/install/utilities
-      isGlobalMode
-      ? ['bun', 'pm', 'bin', '--global']
-      : ['bun', 'pm', 'bin']
-    : null;
-  const binCommandResult =
-    binCommandArgs &&
-    (await execPackageManagerCommand(binCommandArgs).catch((error) => ({
-      error,
-    })));
+  const binCommandResult = await new Promise<
+    | null
+    | ({
+        error?: NonNullable<Parameters<Parameters<typeof execBinCmd>[1]>[0]>;
+      } & Parameters<Parameters<typeof execBinCmd>[1]>[1])
+  >((resolve) => {
+    execBinCmd(isGlobalMode, (error, result) => {
+      resolve(result ? (error ? { error, ...result } : result ?? {}) : null);
+    });
+  });
   const binCommand: {
     readonly args: readonly string[];
     readonly result: string | null;
-  } | null =
-    binCommandArgs && binCommandResult
-      ? {
-          args: binCommandArgs,
-          result:
-            'error' in binCommandResult ? null : binCommandResult.stdout.trim(),
-        }
-      : null;
+  } | null = binCommandResult
+    ? {
+        args: [binCommandResult.command, ...binCommandResult.args],
+        result: binCommandResult.error ? null : binCommandResult.stdout.trim(),
+      }
+    : null;
 
   const binFilepathList = binName
-    ? await findBin(
+    ? await findInstalledExecutables(
         [cwd].concat(binCommand?.result || []),
         isGlobalMode
           ? // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
@@ -377,8 +232,6 @@ async function getEnvAddedByPackageManager(
 
   const { expectedPnPEnabled } = expectedValues;
   if (typeof expectedPnPEnabled === 'boolean') {
-    // see https://yarnpkg.com/advanced/pnpapi#processversionspnp
-    const isPnPEnabled = process.versions['pnp'] !== undefined;
     if (isPnPEnabled !== expectedPnPEnabled) {
       throw new Error(
         `Plug'n'Play is not ${expectedPnPEnabled ? 'enabled' : 'disabled'}`,
