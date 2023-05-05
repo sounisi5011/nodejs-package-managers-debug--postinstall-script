@@ -3,6 +3,8 @@ import * as path from 'path';
 
 import usedPM from 'used-pm';
 
+type ExecError = child_process.ExecFileException | child_process.ExecException;
+
 interface BinCmdMapItem {
   command: string;
   localArgs: readonly string[];
@@ -47,12 +49,18 @@ const DEFAULT_BIN_CMD = BIN_CMD_MAPPING.npm;
 export function execBinCmd(
   isGlobalMode: boolean,
   callback: (
-    error: child_process.ExecFileException | child_process.ExecException | null,
+    error: ExecError | null,
     result: {
       stdout: string;
       stderr: string;
-      command: string;
-      args: readonly string[];
+      readableCommand: {
+        command: string;
+        args: readonly string[];
+      };
+      executedCommand: {
+        command: string;
+        args: readonly string[];
+      };
     } | null,
   ) => void,
 ): void {
@@ -89,7 +97,12 @@ export function execBinCmd(
       : [process.env['npm_execpath'], ...binArgs];
 
     child_process.execFile(command, args, (error, stdout, stderr) => {
-      callback(error, { stdout, stderr, command, args });
+      callback(error, {
+        stdout,
+        stderr,
+        readableCommand: { command: binCmd.command, args: binArgs },
+        executedCommand: { command, args },
+      });
     });
     return;
   }
@@ -97,6 +110,18 @@ export function execBinCmd(
   const bin = binCmd ?? DEFAULT_BIN_CMD;
   const command = bin.command;
   const args = bin[isGlobalMode ? 'globalArgs' : 'localArgs'];
+  const execCallback = (
+    error: ExecError | null,
+    stdout: string,
+    stderr: string,
+  ): void => {
+    callback(error, {
+      stdout,
+      stderr,
+      readableCommand: { command, args },
+      executedCommand: { command, args },
+    });
+  };
 
   if (process.platform === 'win32') {
     // On Windows, the "child_process.execFile()" function cannot execute commands that are not absolute paths.
@@ -106,14 +131,10 @@ export function execBinCmd(
     //       However, this is not a problem because the arguments of the commands executed within this script do not need to be quoted.
     const commandStr = [command, ...args].join(' ');
 
-    child_process.exec(commandStr, (error, stdout, stderr) => {
-      callback(error, { stdout, stderr, command, args });
-    });
+    child_process.exec(commandStr, execCallback);
   } else {
     // The "child_process.execFile()" function is more efficient than the "child_process.exec()" function and does not require escaping arguments.
     // Therefore, it is used on non-Windows platforms.
-    child_process.execFile(command, args, (error, stdout, stderr) => {
-      callback(error, { stdout, stderr, command, args });
-    });
+    child_process.execFile(command, args, execCallback);
   }
 }

@@ -163,7 +163,10 @@ function validateUtils(expected: { isPnPEnabled: unknown }): void {
     readonly result: string | null;
   } | null = binCommandResult
     ? {
-        args: [binCommandResult.command, ...binCommandResult.args],
+        args: [
+          binCommandResult.readableCommand.command,
+          ...binCommandResult.readableCommand.args,
+        ],
         result: binCommandResult.error ? null : binCommandResult.stdout.trim(),
       }
     : null;
