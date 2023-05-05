@@ -1,11 +1,17 @@
 lockfileVersion: '6.0'
 
 patchedDependencies:
+  '@sounisi5011/ts-utils-is-property-accessible@1.0.3':
+    hash: li4ptimetmgxyyglwjyzcg7ccy
+    path: patches/@sounisi5011__ts-utils-is-property-accessible@1.0.3.patch
   used-pm@1.0.0:
-    hash: vagrn54hxsys32i3eqkpm4xpyq
+    hash: eq4ae42dc3wyl5lz7zyifaqv5y
     path: patches/used-pm@1.0.0.patch
 
 dependencies:
+  '@sounisi5011/ts-utils-is-property-accessible':
+    specifier: 1.0.3
+    version: 1.0.3(patch_hash=li4ptimetmgxyyglwjyzcg7ccy)
   ansi-colors:
     specifier: 4.1.3
     version: 4.1.3
@@ -14,7 +20,7 @@ dependencies:
     version: 7.5.0
   used-pm:
     specifier: 1.0.0
-    version: 1.0.0(patch_hash=vagrn54hxsys32i3eqkpm4xpyq)
+    version: 1.0.0(patch_hash=eq4ae42dc3wyl5lz7zyifaqv5y)
 
 devDependencies:
   '@actions/core':
@@ -418,6 +424,11 @@ packages:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.15.0
     dev: true
+
+  /@sounisi5011/ts-utils-is-property-accessible@1.0.3(patch_hash=li4ptimetmgxyyglwjyzcg7ccy):
+    resolution: {integrity: sha512-W4EftDXZsjJn6NCVSSC/kGpHYqKzNsuJjLXp2GPEtdZbQHvOYPSiqZyYbJYxYcK1OsKNcGAPiP9uBqZQ0lyHPw==}
+    dev: false
+    patched: true
 
   /@tsconfig/node10@1.0.9:
     resolution: {integrity: sha512-jNsYVVxU8v5g43Erja32laIDHXeoNvFEpX33OK4d6hljo3jDhCBDhx5dhCCTMWUojscpAagGiRkBKxpdl9fxqA==}
@@ -1678,7 +1689,7 @@ packages:
     dev: true
     optional: true
 
-  /used-pm@1.0.0(patch_hash=vagrn54hxsys32i3eqkpm4xpyq):
+  /used-pm@1.0.0(patch_hash=eq4ae42dc3wyl5lz7zyifaqv5y):
     resolution: {integrity: sha512-imCruP1jKlraI8MgwRYg1gvduqYN1MKe8pfcdX34gx8LfO8JxhVTv6r7LtRvIWOBtamys3+7QEZTMb0ZccHXiQ==}
     dev: false
     patched: true

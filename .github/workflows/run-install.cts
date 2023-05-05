@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { inspect } from 'node:util';
 
+import { isPropAccessible } from '@sounisi5011/ts-utils-is-property-accessible';
 import semverLte from 'semver/functions/lte';
 
 import type * as ActionsCore from '@actions/core';
@@ -50,7 +51,7 @@ function getWinEnv(
 
 function updatePathEnv<T extends string | undefined>(
   env: Readonly<Record<string, T>>,
-  updateFn: (value: T, name: string) => T,
+  updateFn: (value: T | undefined, name: string) => T,
 ): Record<string, T> {
   const isWindows = process.platform === 'win32';
 
@@ -161,35 +162,12 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
       try {
         return [JSON.parse(jsonText) as unknown];
       } catch (error) {
-        error.message += ` in line ${index + 1} (value ${valueCount})`;
+        if (isPropAccessible(error) && typeof error['message'] === 'string') {
+          error['message'] += ` in line ${index + 1} (value ${valueCount})`;
+        }
         throw error;
       }
     });
-  }
-  function indentStr(
-    str: string,
-    prefix: string | number,
-    firstPrefix: string = '',
-  ): string {
-    if (typeof prefix !== 'number' && typeof prefix !== 'string')
-      prefix = String(prefix);
-    if (typeof firstPrefix !== 'string') firstPrefix = String(firstPrefix);
-
-    const indentLength = Math.max(
-      typeof prefix === 'number' ? prefix : prefix.length,
-      firstPrefix.length,
-    );
-    const prefixStr =
-      typeof prefix === 'number'
-        ? ' '.repeat(indentLength)
-        : prefix + ' '.repeat(indentLength - prefix.length);
-    const firstPrefixStr = firstPrefix
-      ? firstPrefix + ' '.repeat(indentLength - firstPrefix.length)
-      : prefixStr;
-
-    return str.replace(/^(?!$)/gms, (_, offset) =>
-      offset === 0 ? firstPrefixStr : prefixStr,
-    );
   }
   function filepathUsingEnvNameList(
     filepath: string,
@@ -342,10 +320,11 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
       .getExecOutput('rustc --version --verbose')
       .then(({ stdout }) => {
         const match = /^host:\s*(.+)\s*$/m.exec(stdout);
-        if (!match) {
+        const host = match?.[1];
+        if (!host) {
           throw new Error('Failed to detect Rust target');
         }
-        return match[1];
+        return host;
       });
     const cmdExt = process.platform === 'win32' ? '.exe' : '';
 
@@ -417,8 +396,9 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
     const cwd = process.cwd();
     const packageDir = 'packages/hoge';
     const origPostinstallScript =
-      typeof pkgJson.scripts?.['postinstall'] === 'string'
-        ? pkgJson.scripts['postinstall']
+      isPropAccessible(pkgJson['scripts']) &&
+      typeof pkgJson['scripts']['postinstall'] === 'string'
+        ? pkgJson['scripts']['postinstall']
         : undefined;
     if (pmType === 'npm' || pmType === 'yarn' || pmType === 'bun') {
       // see https://docs.npmjs.com/cli/v7/using-npm/workspaces
@@ -435,8 +415,8 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
       // see https://github.com/oven-sh/bun/blob/2dc3f4e0306518b16eb0bd9a505f9bc12963ec4d/docs/install/workspaces.md
 
       // In Yarn v1, the "private" field is required
-      pkgJson.private = true;
-      pkgJson.workspaces = [
+      pkgJson['private'] = true;
+      pkgJson['workspaces'] = [
         // glob syntax is supported as of Bun v0.5.8; it is not available in Bun v0.5.7 or lower.
         packageDir,
       ];
@@ -448,8 +428,8 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
         JSON.stringify({ packages: [packageDir] }),
       );
     }
-    pkgJson.scripts = {
-      ...(typeof pkgJson.scripts === 'object' ? pkgJson.scripts : {}),
+    pkgJson['scripts'] = {
+      ...(typeof pkgJson['scripts'] === 'object' ? pkgJson['scripts'] : {}),
       postinstall: origPostinstallScript?.replace(
         /(?<=['"])Project(?= Root)/,
         'Workspaces',
@@ -591,7 +571,7 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
           if (pnp) {
             // see https://classic.yarnpkg.com/en/docs/pnp/getting-started
             // see https://github.com/yarnpkg/yarn/pull/6382
-            pkgJson.installConfig = {
+            pkgJson['installConfig'] = {
               pnp: true,
             };
           }
@@ -926,7 +906,7 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
         });
         if (pmType === 'yarn' && !isYarnBerry && pnp) {
           // see https://github.com/yarnpkg/yarn/pull/6382
-          globalInstallEnv.YARN_PLUGNPLAY_OVERRIDE = '1';
+          globalInstallEnv['YARN_PLUGNPLAY_OVERRIDE'] = '1';
         }
         await fs.writeFile(
           getRequiredEnv('DEBUG_ORIGINAL_ENV_JSON_PATH', { globalInstallEnv }),
@@ -1012,7 +992,9 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
               postinstallType ===
               getRequiredEnv('POSTINSTALL_TYPE', { globalInstallEnv }),
           ) ?? ({} as Partial<DebugDataFromPostinstall>);
-        async function inspectInstalledBin(bindirPath) {
+        async function inspectInstalledBin(
+          bindirPath: string,
+        ): Promise<string> {
           return await fs
             .readdir(bindirPath)
             .then((files) => {
@@ -1036,7 +1018,7 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
         if (binCommand?.result) {
           binCommandMap.set(binCommand.args.join(' '), binCommand.result);
         } else if (pmType === 'bun') {
-          const binCmdArgs = ['bun', 'pm', 'bin', '--global'];
+          const binCmdArgs = ['bun', 'pm', 'bin', '--global'] as const;
           binCommandMap.set(
             binCmdArgs.join(' '),
             await exec

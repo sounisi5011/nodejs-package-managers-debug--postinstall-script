@@ -1,0 +1,22 @@
+diff --git a/dist/index.js b/dist/index.mjs
+similarity index 100%
+rename from dist/index.js
+rename to dist/index.mjs
+diff --git a/package.json b/package.json
+index 90e05395d1171ef70aa7eaf5dba4b821017f2e11..2914c06fe9f27ef4a7f40830864cefac6f2d7262 100644
+--- a/package.json
++++ b/package.json
+@@ -44,11 +44,11 @@
+   },
+   "license": "MIT",
+   "author": "sounisi5011",
+-  "type": "module",
++  "type": "commonjs",
+   "exports": {
+     ".": {
+       "types": "./dist/index.d.ts",
+-      "import": "./dist/index.js",
++      "import": "./dist/index.mjs",
+       "require": "./dist/index.cjs"
+     },
+     "./package.json": "./package.json"

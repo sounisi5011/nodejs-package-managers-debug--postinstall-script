@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isPropAccessible } from '@sounisi5011/ts-utils-is-property-accessible';
 import * as esbuild from 'esbuild';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -35,16 +36,11 @@ function* walkParentDir(filepath) {
 }
 
 /**
- * @type {Map<string, boolean>}
- */
-const isEsmCache = new Map();
-
-/**
  * @param {string} filepath
  * @returns {Promise<boolean>}
  */
 async function isEsm(filepath) {
-  const jsType = /\.([mc]?)[jt]sx?$/i.exec(filepath)?.[1].toLowerCase();
+  const jsType = /\.([mc]?)[jt]sx?$/i.exec(filepath)?.[1]?.toLowerCase();
   if (jsType === 'm') return true;
 
   if (jsType === '') {
@@ -54,8 +50,9 @@ async function isEsm(filepath) {
         const pkgJson = JSON.parse(
           await fs.readFile(path.join(dirpath, 'package.json'), 'utf8'),
         );
-        if (pkgJson?.['type'] === 'module') return true;
-        if (pkgJson?.['type'] === 'commonjs') return false;
+        if (!isPropAccessible(pkgJson)) continue;
+        if (pkgJson['type'] === 'module') return true;
+        if (pkgJson['type'] === 'commonjs') return false;
       } catch {}
     }
   }

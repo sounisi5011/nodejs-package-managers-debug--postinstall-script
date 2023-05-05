@@ -25,7 +25,7 @@ const packageManager = usedPM();
 let isGlobalMode = false;
 // In npm and pnpm, global mode can be detected by reading the "npm_config_global" environment variable.
 // Older npm defines this for local mode as well, so make sure it is equal to "'true'".
-if (process.env.npm_config_global === 'true') {
+if (process.env['npm_config_global'] === 'true') {
   isGlobalMode = true;
 }
 // In Yarn v1, global mode can be detected by reading the "npm_config_argv" environment variable.
@@ -33,8 +33,8 @@ if (process.env.npm_config_global === 'true') {
 // It is parsed to check if the called subcommand is "yarn global add".
 const isYarn1 =
   packageManager?.name === 'yarn' && packageManager.version.startsWith('1.');
-if (isYarn1 && process.env.npm_config_argv) {
-  const npmArgv = JSON.parse(process.env.npm_config_argv);
+if (isYarn1 && process.env['npm_config_argv']) {
+  const npmArgv = JSON.parse(process.env['npm_config_argv']);
   if (Array.isArray(npmArgv?.original)) {
     // Arguments include options.
     // To ignore them, compare the position of the keywords "global" and "add" to check whether the subcommand is "yarn global add".
@@ -96,11 +96,11 @@ async function findBin(
 
 const postinstallType =
   process.argv
-    .map((arg) => /^--type\s*=(.+)$/.exec(arg)?.[1].trim())
-    .findLast(Boolean) ?? process.env.POSTINSTALL_TYPE;
+    .map((arg) => /^--type\s*=(.+)$/.exec(arg)?.[1]?.trim())
+    .findLast(Boolean) ?? process.env['POSTINSTALL_TYPE'];
 
 async function execPackageManagerCommand(
-  commandAndArgs: readonly string[],
+  commandAndArgs: readonly [string, ...string[]],
 ): Promise<{
   stdout: string;
   stderr: string;
@@ -116,13 +116,13 @@ async function execPackageManagerCommand(
   // Note: On Windows, the "child_process.exec()" function cannot execute absolute path commands.
   //       We need to use the "child_process.execFile()" function instead.
   //       Therefore, the "child_process.execFile()" function is used here even on Windows.
-  if (process.env.npm_execpath) {
+  if (process.env['npm_execpath']) {
     const execpathIsJS = /\.[cm]?js$/.test(
-      path.extname(process.env.npm_execpath),
+      path.extname(process.env['npm_execpath']),
     );
-    const commandAndArgs = execpathIsJS
-      ? [process.execPath, process.env.npm_execpath, ...args]
-      : [process.env.npm_execpath, ...args];
+    const commandAndArgs: [string, ...string[]] = execpathIsJS
+      ? [process.execPath, process.env['npm_execpath'], ...args]
+      : [process.env['npm_execpath'], ...args];
     const additionalProperties = { commandAndArgs };
 
     try {
@@ -131,7 +131,7 @@ async function execPackageManagerCommand(
         additionalProperties,
       );
     } catch (error) {
-      throw Object.assign(error, additionalProperties);
+      throw Object.assign(error ?? {}, additionalProperties);
     }
   }
 
@@ -151,7 +151,7 @@ async function execPackageManagerCommand(
       additionalProperties,
     );
   } catch (error) {
-    throw Object.assign(error, additionalProperties);
+    throw Object.assign(error ?? {}, additionalProperties);
   }
 }
 
@@ -268,24 +268,33 @@ async function getEnvAddedByPackageManager(
     .catch(() => undefined);
   const binName = Object.keys(pkg?.bin ?? {})[0];
 
-  const binCommandArgs = isYarn1
+  const binCommandArgs: readonly [string, ...string[]] | null = isYarn1
     ? isGlobalMode
       ? ['yarn', 'global', 'bin']
       : ['yarn', 'bin']
     : packageManager?.name === 'pnpm'
-    ? ['pnpm', 'bin'].concat(isGlobalMode ? '--global' : [])
+    ? isGlobalMode
+      ? ['pnpm', 'bin', '--global']
+      : ['pnpm', 'bin']
     : packageManager?.name === 'npm'
-    ? ['npm', 'bin'].concat(isGlobalMode ? '--global' : [])
+    ? isGlobalMode
+      ? ['npm', 'bin', '--global']
+      : ['npm', 'bin']
     : packageManager?.name === 'bun'
     ? // see https://bun.sh/docs/install/utilities
-      ['bun', 'pm', 'bin'].concat(isGlobalMode ? '--global' : [])
+      isGlobalMode
+      ? ['bun', 'pm', 'bin', '--global']
+      : ['bun', 'pm', 'bin']
     : null;
   const binCommandResult =
     binCommandArgs &&
     (await execPackageManagerCommand(binCommandArgs).catch((error) => ({
       error,
     })));
-  const binCommand: { args: string[]; result: string | null } | null =
+  const binCommand: {
+    readonly args: readonly string[];
+    readonly result: string | null;
+  } | null =
     binCommandArgs && binCommandResult
       ? {
           args: binCommandArgs,
@@ -307,14 +316,14 @@ async function getEnvAddedByPackageManager(
     : undefined;
 
   const expectedValues: Readonly<Record<string, unknown>> = JSON.parse(
-    process.env.DEBUG_EXPECTED_VARS_JSON || '{}',
+    process.env['DEBUG_EXPECTED_VARS_JSON'] || '{}',
   );
   const debugData = {
     cwd,
     ...expectedValues,
     isGlobalMode,
     // see https://yarnpkg.com/advanced/pnpapi#processversionspnp
-    pnpVersion: process.versions.pnp,
+    pnpVersion: process.versions['pnp'],
     realBin: binFilepathList,
     ...(binCommand?.args
       ? { [binCommand.args.join(' ')]: binCommandResult }
@@ -369,7 +378,7 @@ async function getEnvAddedByPackageManager(
   const { expectedPnPEnabled } = expectedValues;
   if (typeof expectedPnPEnabled === 'boolean') {
     // see https://yarnpkg.com/advanced/pnpapi#processversionspnp
-    const isPnPEnabled = process.versions.pnp !== undefined;
+    const isPnPEnabled = process.versions['pnp'] !== undefined;
     if (isPnPEnabled !== expectedPnPEnabled) {
       throw new Error(
         `Plug'n'Play is not ${expectedPnPEnabled ? 'enabled' : 'disabled'}`,
