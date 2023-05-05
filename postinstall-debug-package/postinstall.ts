@@ -1,20 +1,31 @@
-const { exec, execFile } = require('child_process');
-const { appendFile, readdir, readFile, writeFile } = require('fs/promises');
-const path = require('path');
-const { inspect, promisify } = require('util');
+import { exec, execFile } from 'child_process';
+import { appendFile, readdir, readFile, writeFile } from 'fs/promises';
+import * as path from 'path';
+import { inspect, promisify } from 'util';
+import type { InspectOptions } from 'util';
 
-const ansiColors = require('ansi-colors');
-const usedPM = require('used-pm');
+import ansiColors from 'ansi-colors';
+import usedPM from 'used-pm';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
+
+/**
+ * @see https://nodejs.org/api/util.html#custom-inspection-functions-on-objects
+ */
+type CustomInspectFunction<TThis = unknown> = (
+  this: TThis,
+  depth: number,
+  options: Readonly<InspectOptions>,
+  _inspect: typeof inspect,
+) => string;
 
 const packageManager = usedPM();
 
 let isGlobalMode = false;
 // In npm and pnpm, global mode can be detected by reading the "npm_config_global" environment variable.
 // Older npm defines this for local mode as well, so make sure it is equal to "'true'".
-if (process.env.npm_config_global === 'true') {
+if (process.env['npm_config_global'] === 'true') {
   isGlobalMode = true;
 }
 // In Yarn v1, global mode can be detected by reading the "npm_config_argv" environment variable.
@@ -22,8 +33,8 @@ if (process.env.npm_config_global === 'true') {
 // It is parsed to check if the called subcommand is "yarn global add".
 const isYarn1 =
   packageManager?.name === 'yarn' && packageManager.version.startsWith('1.');
-if (isYarn1 && process.env.npm_config_argv) {
-  const npmArgv = JSON.parse(process.env.npm_config_argv);
+if (isYarn1 && process.env['npm_config_argv']) {
+  const npmArgv = JSON.parse(process.env['npm_config_argv']);
   if (Array.isArray(npmArgv?.original)) {
     // Arguments include options.
     // To ignore them, compare the position of the keywords "global" and "add" to check whether the subcommand is "yarn global add".
@@ -44,19 +55,15 @@ if (isYarn1 && process.env.npm_config_argv) {
 // The "yarn global add" command has been replaced with the "yarn dlx" command.
 // see https://yarnpkg.com/getting-started/migration#use-yarn-dlx-instead-of-yarn-global
 
-/**
- * @param {readonly string[]} cwdList
- * @param {readonly string[]} dirnameList
- * @param {string} binName
- * @returns {Promise<string[]>}
- */
-async function findBin(cwdList, dirnameList, binName) {
-  /** @type {Set<string>} */
-  const bindirSet = new Set(
+async function findBin(
+  cwdList: readonly string[],
+  dirnameList: readonly string[],
+  binName: string,
+): Promise<string[]> {
+  const bindirSet = new Set<string>(
     cwdList
       .flatMap((cwd) => {
-        /** @type {string[]} */
-        const cwdList = [];
+        const cwdList: string[] = [];
         while (true) {
           cwdList.push(cwd);
           const parentDir = path.dirname(cwd);
@@ -71,8 +78,7 @@ async function findBin(cwdList, dirnameList, binName) {
       ),
   );
 
-  /** @type {string[]} */
-  const binFilepathList = [];
+  const binFilepathList: string[] = [];
   for (const bindir of bindirSet) {
     const filenameList = await readdir(bindir).catch(() => []);
     binFilepathList.push(
@@ -90,18 +96,16 @@ async function findBin(cwdList, dirnameList, binName) {
 
 const postinstallType =
   process.argv
-    .map((arg) => /^--type\s*=(.+)$/.exec(arg)?.[1].trim())
-    .findLast(Boolean) ?? process.env.POSTINSTALL_TYPE;
+    .map((arg) => /^--type\s*=(.+)$/.exec(arg)?.[1]?.trim())
+    .findLast(Boolean) ?? process.env['POSTINSTALL_TYPE'];
 
-/**
- * @param {string[]} commandAndArgs
- * @returns {Promise<{
- *   stdout: string,
- *   stderr: string,
- *   commandAndArgs: string[],
- * }>}
- */
-async function execPackageManagerCommand(commandAndArgs) {
+async function execPackageManagerCommand(
+  commandAndArgs: readonly [string, ...string[]],
+): Promise<{
+  stdout: string;
+  stderr: string;
+  commandAndArgs: readonly string[];
+}> {
   const command = commandAndArgs[0];
   const args = commandAndArgs.slice(1);
 
@@ -112,13 +116,13 @@ async function execPackageManagerCommand(commandAndArgs) {
   // Note: On Windows, the "child_process.exec()" function cannot execute absolute path commands.
   //       We need to use the "child_process.execFile()" function instead.
   //       Therefore, the "child_process.execFile()" function is used here even on Windows.
-  if (process.env.npm_execpath) {
+  if (process.env['npm_execpath']) {
     const execpathIsJS = /\.[cm]?js$/.test(
-      path.extname(process.env.npm_execpath),
+      path.extname(process.env['npm_execpath']),
     );
-    const commandAndArgs = execpathIsJS
-      ? [process.execPath, process.env.npm_execpath, ...args]
-      : [process.env.npm_execpath, ...args];
+    const commandAndArgs: [string, ...string[]] = execpathIsJS
+      ? [process.execPath, process.env['npm_execpath'], ...args]
+      : [process.env['npm_execpath'], ...args];
     const additionalProperties = { commandAndArgs };
 
     try {
@@ -127,7 +131,7 @@ async function execPackageManagerCommand(commandAndArgs) {
         additionalProperties,
       );
     } catch (error) {
-      throw Object.assign(error, additionalProperties);
+      throw Object.assign(error ?? {}, additionalProperties);
     }
   }
 
@@ -147,24 +151,22 @@ async function execPackageManagerCommand(commandAndArgs) {
       additionalProperties,
     );
   } catch (error) {
-    throw Object.assign(error, additionalProperties);
+    throw Object.assign(error ?? {}, additionalProperties);
   }
 }
 
-/**
- * @param {NodeJS.ProcessEnv} env
- * @param {object} [options]
- * @param {string} [options.cwd]
- * @param {Record<string, unknown>} [options.prefixesToCompareRecord]
- * @returns {Promise<NodeJS.ProcessEnv>}
- */
 async function getEnvAddedByPackageManager(
-  env = process.env,
-  { cwd = process.cwd(), prefixesToCompareRecord } = {},
-) {
+  env: NodeJS.ProcessEnv = process.env,
+  {
+    cwd = process.cwd(),
+    prefixesToCompareRecord,
+  }: {
+    cwd?: string;
+    prefixesToCompareRecord?: Readonly<Record<string, unknown>>;
+  } = {},
+): Promise<NodeJS.ProcessEnv> {
   const specialenvName = 'DEBUG_ORIGINAL_ENV_JSON_PATH';
-  /** @type {Record<string, unknown> | null} */
-  const origEnv = env[specialenvName]
+  const origEnv: Record<string, unknown> | null = env[specialenvName]
     ? await readFile(env[specialenvName], 'utf8').then(JSON.parse)
     : null;
   const prefixRecord = Object.assign(
@@ -174,26 +176,17 @@ async function getEnvAddedByPackageManager(
     prefixesToCompareRecord,
   );
 
-  /**
-   * @this {NodeJS.ProcessEnv}
-   * @param {number} _depth
-   * @param {Readonly<import('util').InspectOptions>} options
-   * @param {import('util').inspect} inspect
-   */
-  function customInspect(_depth, options, inspect) {
-    const entries = Object.entries(this).map(([key, value]) => [
-      key,
-      {
-        /**
-         * @param {number} _depth
-         * @param {Readonly<import('util').InspectOptions>} options
-         * @param {import('util').inspect} inspect
-         */
-        [inspect.custom](_depth, options, inspect) {
+  const customInspect: CustomInspectFunction<Record<string, unknown>> =
+    function (_depth, options, inspect) {
+      const entries = Object.entries(this).map(([key, value]) => {
+        const customInspectFn: CustomInspectFunction = function (
+          _depth,
+          options,
+          inspect,
+        ) {
           const writableOptions = { ...options };
           const origValue = origEnv?.[key];
-          /** @type {string[]} */
-          let commentList = [];
+          let commentList: string[] = [];
 
           if (/^PATH$/i.test(key) && typeof value === 'string') {
             const pathList = value
@@ -238,11 +231,11 @@ async function getEnvAddedByPackageManager(
                 commentList.map((comment) => `\n// ${comment}`).join('')
               ).replace(/^(?!$)/gm, '  ')}\n)`
             : inspectResult;
-        },
-      },
-    ]);
-    return inspect(Object.fromEntries(entries), options);
-  }
+        };
+        return [key, { [inspect.custom]: customInspectFn }];
+      });
+      return inspect(Object.fromEntries(entries), options);
+    };
 
   const envEntries = Object.entries(env);
   return Object.assign(
@@ -275,25 +268,33 @@ async function getEnvAddedByPackageManager(
     .catch(() => undefined);
   const binName = Object.keys(pkg?.bin ?? {})[0];
 
-  const binCommandArgs = isYarn1
+  const binCommandArgs: readonly [string, ...string[]] | null = isYarn1
     ? isGlobalMode
       ? ['yarn', 'global', 'bin']
       : ['yarn', 'bin']
     : packageManager?.name === 'pnpm'
-    ? ['pnpm', 'bin'].concat(isGlobalMode ? '--global' : [])
+    ? isGlobalMode
+      ? ['pnpm', 'bin', '--global']
+      : ['pnpm', 'bin']
     : packageManager?.name === 'npm'
-    ? ['npm', 'bin'].concat(isGlobalMode ? '--global' : [])
+    ? isGlobalMode
+      ? ['npm', 'bin', '--global']
+      : ['npm', 'bin']
     : packageManager?.name === 'bun'
     ? // see https://bun.sh/docs/install/utilities
-      ['bun', 'pm', 'bin'].concat(isGlobalMode ? '--global' : [])
+      isGlobalMode
+      ? ['bun', 'pm', 'bin', '--global']
+      : ['bun', 'pm', 'bin']
     : null;
   const binCommandResult =
     binCommandArgs &&
     (await execPackageManagerCommand(binCommandArgs).catch((error) => ({
       error,
     })));
-  /** @type {{ args: string[], result: string | null } | null} */
-  const binCommand =
+  const binCommand: {
+    readonly args: readonly string[];
+    readonly result: string | null;
+  } | null =
     binCommandArgs && binCommandResult
       ? {
           args: binCommandArgs,
@@ -314,16 +315,15 @@ async function getEnvAddedByPackageManager(
       )
     : undefined;
 
-  /** @type {Readonly<Record<string, unknown>>} */
-  const expectedValues = JSON.parse(
-    process.env.DEBUG_EXPECTED_VARS_JSON || '{}',
+  const expectedValues: Readonly<Record<string, unknown>> = JSON.parse(
+    process.env['DEBUG_EXPECTED_VARS_JSON'] || '{}',
   );
   const debugData = {
     cwd,
     ...expectedValues,
     isGlobalMode,
     // see https://yarnpkg.com/advanced/pnpapi#processversionspnp
-    pnpVersion: process.versions.pnp,
+    pnpVersion: process.versions['pnp'],
     realBin: binFilepathList,
     ...(binCommand?.args
       ? { [binCommand.args.join(' ')]: binCommandResult }
@@ -378,7 +378,7 @@ async function getEnvAddedByPackageManager(
   const { expectedPnPEnabled } = expectedValues;
   if (typeof expectedPnPEnabled === 'boolean') {
     // see https://yarnpkg.com/advanced/pnpapi#processversionspnp
-    const isPnPEnabled = process.versions.pnp !== undefined;
+    const isPnPEnabled = process.versions['pnp'] !== undefined;
     if (isPnPEnabled !== expectedPnPEnabled) {
       throw new Error(
         `Plug'n'Play is not ${expectedPnPEnabled ? 'enabled' : 'disabled'}`,

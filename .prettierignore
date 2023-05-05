@@ -6,6 +6,9 @@
 !*.json
 !*.json5
 !*.md
+!*.ts
+!*.cts
+!*.mts
 !*.yaml
 !*.yml
 !.czrc

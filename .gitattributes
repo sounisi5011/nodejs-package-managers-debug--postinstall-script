@@ -5,3 +5,10 @@
 # see https://github.com/commitizen/cz-cli/blob/v4.3.0/src/commitizen/configLoader.js
 # see https://github.com/commitizen/cz-cli/blob/v4.3.0/src/configLoader/getContent.js#L12-L43
 .czrc linguist-language=JSON-with-Comments
+
+# GitHub detects only `tsconfig.json` files as JSONC by default.
+# see https://github.com/github-linguist/linguist/blob/5a0c74277548122267d84283910abd5e0b89380e/lib/linguist/languages.yml#L3141
+# However, VSCode also detects `tsconfig.*.json` and `tsconfig-*.json` as JSONC.
+# see https://github.com/microsoft/vscode/blob/1.78.0/extensions/typescript-language-features/package.json#L85-L108
+# We will also use the latter filename, so we will tell GitHub that these are JSONC.
+tsconfig[.-]*.json linguist-language=JSON-with-Comments

@@ -82,6 +82,7 @@ jobs:
           (
             cd "${debugger_package_path}" && {
               pnpm pack
+              find . -type f -name '*.tgz' -print0 | xargs -0 -t -n 1 tar --list --verbose --file
               mv ./*.tgz "${root_path}/${{ env.tarball-name }}"
             }
           )

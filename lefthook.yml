@@ -2,7 +2,7 @@ pre-commit:
   parallel: true
   commands:
     prettier:
-      glob: "{*.{js,cjs,mjs,json,json5,md,yaml,yml},.czrc}"
+      glob: "{*.{js,cjs,mjs,json,json5,md,ts,cts,mts,yaml,yml},.czrc}"
       stage_fixed: true
       run: pnpm exec prettier --write {staged_files}
     format-package-json:
@@ -15,6 +15,15 @@ pre-commit:
         pnpm exec prettier-package-json --write {staged_files}
         && pnpm exec sort-package-json {staged_files}
 
+pre-push:
+  commands:
+    type-check:
+      # Call the "lefthook run ..." command within lefthook to perform parallel execution in the middle of a serial execution
+      # see https://github.com/evilmartians/lefthook/issues/66#issuecomment-1313279972
+      env:
+        LEFTHOOK_QUIET: meta,summary,success
+      run: pnpm exec lefthook run type-check
+
 prepare-commit-msg:
   # Always prints the output of each command.
   # This allows the error log to be checked even if the command becomes busy.
@@ -23,3 +32,15 @@ prepare-commit-msg:
     commitizen:
       interactive: true
       run: node_modules/.bin/cz --hook || true
+
+##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #####
+
+type-check:
+  parallel: true
+  commands:
+    scripts:
+      run: pnpm exec tsc --noEmit
+    github-workflow:
+      run: pnpm exec tsc --project ./.github/workflows --noEmit
+    postinstall-debugger:
+      run: pnpm exec tsc --project ./postinstall-debug-package --noEmit

@@ -7,3 +7,15 @@ index b16de95cc4c8fa10da3600da877742de1c14cb5a..3b939a0670f2fbd82deeb96576aea35a
  
  export { _default as default };
 +export = _default;
+diff --git a/package.json b/package.json
+index 35c055c28d12532b6e20eead14a629219ef4a171..0ecae10c55538a8194bd931df2b7cd4fea16f248 100644
+--- a/package.json
++++ b/package.json
+@@ -13,6 +13,7 @@
+ 	"license": "MIT",
+ 	"author": "Alexander Böhm <tools@boehm.work>",
+ 	"exports": {
++		"types": "./dist/index.d.ts",
+ 		"import": "./dist/index.js",
+ 		"require": "./dist/index.cjs"
+ 	},
