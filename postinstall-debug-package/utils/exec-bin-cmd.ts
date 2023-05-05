@@ -85,13 +85,8 @@ export function execBinCmd(
       path.extname(process.env['npm_execpath']),
     );
     const [command, ...args] = execpathIsJS
-      ? [
-          process.execPath,
-          process.env['npm_execpath'],
-          binCmd.command,
-          ...binArgs,
-        ]
-      : [process.env['npm_execpath'], binCmd.command, ...binArgs];
+      ? [process.execPath, process.env['npm_execpath'], ...binArgs]
+      : [process.env['npm_execpath'], ...binArgs];
 
     child_process.execFile(command, args, (error, stdout, stderr) => {
       callback(error, { stdout, stderr, command, args });
