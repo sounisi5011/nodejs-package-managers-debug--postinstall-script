@@ -12,9 +12,8 @@
 
     /* Emit */
     "noEmit": true,
-    "newLine": "lf",
-
-    /* Interop Constraints */
-    "verbatimModuleSyntax": true
+    "importsNotUsedAsValues": "error",
+    "ignoreDeprecations": "5.0",
+    "newLine": "lf"
   }
 }
