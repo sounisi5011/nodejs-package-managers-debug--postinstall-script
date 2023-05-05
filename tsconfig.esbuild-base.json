@@ -5,6 +5,11 @@
   "compilerOptions": {
     /* Visit https://aka.ms/tsconfig to read more about this file */
 
+    /* Modules */
+    "moduleResolution": "bundler",
+    // When using the 'moduleResolution: bundler' option, we cannot pass 'Node16' to the 'module' option
+    "module": "ES2020",
+
     /* Interop Constraints */
     "isolatedModules": true,
     "esModuleInterop": true

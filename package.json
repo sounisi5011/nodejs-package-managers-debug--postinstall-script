@@ -32,8 +32,7 @@
   "packageManager": "pnpm@8.2.0",
   "pnpm": {
     "patchedDependencies": {
-      "used-pm@1.0.0": "patches/used-pm@1.0.0.patch",
-      "@sounisi5011/ts-utils-is-property-accessible@1.0.3": "patches/@sounisi5011__ts-utils-is-property-accessible@1.0.3.patch"
+      "used-pm@1.0.0": "patches/used-pm@1.0.0.patch"
     }
   }
 }

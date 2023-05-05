@@ -1,9 +1,6 @@
 lockfileVersion: '6.0'
 
 patchedDependencies:
-  '@sounisi5011/ts-utils-is-property-accessible@1.0.3':
-    hash: li4ptimetmgxyyglwjyzcg7ccy
-    path: patches/@sounisi5011__ts-utils-is-property-accessible@1.0.3.patch
   used-pm@1.0.0:
     hash: eq4ae42dc3wyl5lz7zyifaqv5y
     path: patches/used-pm@1.0.0.patch
@@ -11,7 +8,7 @@ patchedDependencies:
 dependencies:
   '@sounisi5011/ts-utils-is-property-accessible':
     specifier: 1.0.3
-    version: 1.0.3(patch_hash=li4ptimetmgxyyglwjyzcg7ccy)
+    version: 1.0.3
   ansi-colors:
     specifier: 4.1.3
     version: 4.1.3
@@ -425,10 +422,9 @@ packages:
       fastq: 1.15.0
     dev: true
 
-  /@sounisi5011/ts-utils-is-property-accessible@1.0.3(patch_hash=li4ptimetmgxyyglwjyzcg7ccy):
+  /@sounisi5011/ts-utils-is-property-accessible@1.0.3:
     resolution: {integrity: sha512-W4EftDXZsjJn6NCVSSC/kGpHYqKzNsuJjLXp2GPEtdZbQHvOYPSiqZyYbJYxYcK1OsKNcGAPiP9uBqZQ0lyHPw==}
     dev: false
-    patched: true
 
   /@tsconfig/node10@1.0.9:
     resolution: {integrity: sha512-jNsYVVxU8v5g43Erja32laIDHXeoNvFEpX33OK4d6hljo3jDhCBDhx5dhCCTMWUojscpAagGiRkBKxpdl9fxqA==}
