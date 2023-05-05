@@ -6,5 +6,6 @@
      * see https://github.com/commitizen/cz-cli/blob/v4.3.0/src/configLoader/getContent.js#L12-L43
      */
     ".czrc": "jsonc"
-  }
+  },
+  "typescript.tsdk": "./node_modules/typescript/lib"
 }
