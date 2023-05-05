@@ -5,6 +5,9 @@
   "bin": {
     "bar": "./do-nothing.js"
   },
+  "files": [
+    "*.js"
+  ],
   "scripts": {
     "postinstall": "node ./postinstall.js"
   }
