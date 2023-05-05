@@ -215,7 +215,7 @@ function validateUtils(expected: { isPnPEnabled: unknown }): void {
         ...(postinstallType ? [`<summary>${postinstallType}</summary>`] : []),
         '',
         '```js',
-        inspect(debugData),
+        inspect(debugData, { depth: Infinity }),
         '```',
         '',
         '</details>',
