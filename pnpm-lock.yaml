@@ -1,9 +1,9 @@
 lockfileVersion: '6.0'
 
 patchedDependencies:
-  used-pm@1.0.0:
-    hash: eq4ae42dc3wyl5lz7zyifaqv5y
-    path: patches/used-pm@1.0.0.patch
+  used-pm@1.0.1:
+    hash: g6ive3ivyimqxjlztpcgw7webm
+    path: patches/used-pm@1.0.1.patch
 
 dependencies:
   '@sounisi5011/ts-utils-is-property-accessible':
@@ -16,8 +16,8 @@ dependencies:
     specifier: 7.5.0
     version: 7.5.0
   used-pm:
-    specifier: 1.0.0
-    version: 1.0.0(patch_hash=eq4ae42dc3wyl5lz7zyifaqv5y)
+    specifier: 1.0.1
+    version: 1.0.1(patch_hash=g6ive3ivyimqxjlztpcgw7webm)
 
 devDependencies:
   '@actions/core':
@@ -1685,8 +1685,8 @@ packages:
     dev: true
     optional: true
 
-  /used-pm@1.0.0(patch_hash=eq4ae42dc3wyl5lz7zyifaqv5y):
-    resolution: {integrity: sha512-imCruP1jKlraI8MgwRYg1gvduqYN1MKe8pfcdX34gx8LfO8JxhVTv6r7LtRvIWOBtamys3+7QEZTMb0ZccHXiQ==}
+  /used-pm@1.0.1(patch_hash=g6ive3ivyimqxjlztpcgw7webm):
+    resolution: {integrity: sha512-pR0AUS7tPwke+CSMxD6PJt62z9Rew4uAHflegnuAVc41C0niRVDILIarSIDUeCvBxG9W0cUW/nA2q5SUV/jSKQ==}
     dev: false
     patched: true
 
