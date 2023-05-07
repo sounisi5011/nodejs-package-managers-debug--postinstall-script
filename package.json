@@ -9,7 +9,7 @@
     "@sounisi5011/ts-utils-is-property-accessible": "1.0.3",
     "ansi-colors": "4.1.3",
     "semver": "7.5.0",
-    "used-pm": "1.0.1"
+    "used-pm": "1.0.2"
   },
   "devDependencies": {
     "@actions/core": "1.10.0",
@@ -29,10 +29,5 @@
     "sort-package-json": "2.4.1",
     "typescript": "5.0.4"
   },
-  "packageManager": "pnpm@8.2.0",
-  "pnpm": {
-    "patchedDependencies": {
-      "used-pm@1.0.1": "patches/used-pm@1.0.1.patch"
-    }
-  }
+  "packageManager": "pnpm@8.2.0"
 }
