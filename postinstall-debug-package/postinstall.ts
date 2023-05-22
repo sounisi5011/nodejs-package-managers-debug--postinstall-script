@@ -3,39 +3,12 @@ import * as path from 'path';
 import { inspect } from 'util';
 
 import ansiColors from 'ansi-colors';
-import type { JsonObject } from 'type-fest';
 
 import { isGlobalMode } from './utils/is-global-mode';
 import { isPnPEnabled } from './utils/is-pnp-enabled';
 import { execBinCmd } from './utils/exec-bin-cmd';
 import { findInstalledExecutables } from './utils/find-installed-executables';
-
-export interface OutputData extends JsonObject {
-  readonly postinstallType: string | null;
-  readonly binName: string | null;
-  readonly actual: {
-    readonly cwd: string;
-    readonly env: Readonly<Record<string, string | null>>;
-    readonly pnpVersion: string | null;
-    readonly isGlobalMode: boolean;
-    readonly binCommandResult:
-      | ({
-          readonly stdout: string;
-          readonly stderr: string;
-          readonly error: string | null;
-        } & Readonly<
-          Record<
-            `${'readable' | 'executed'}Command`,
-            {
-              readonly command: string;
-              readonly args: readonly string[];
-            }
-          >
-        >)
-      | null;
-    readonly foundBinFiles: readonly string[] | null;
-  };
-}
+import type { OutputData } from './types';
 
 const postinstallType =
   process.argv

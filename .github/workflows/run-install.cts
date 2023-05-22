@@ -11,7 +11,7 @@ import type * as ActionsIo from '@actions/io';
 import type * as ActionsExec from '@actions/exec';
 
 import { envDiff } from './utils/env-diff';
-import type { OutputData as OutputDataFromPostinstall } from '../../postinstall-debug-package/postinstall';
+import type { OutputData as OutputDataFromPostinstall } from '../../postinstall-debug-package/types';
 
 const BIN_NAME = 'bar';
 
