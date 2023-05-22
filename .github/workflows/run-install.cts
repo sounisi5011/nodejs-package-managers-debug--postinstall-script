@@ -10,6 +10,9 @@ import type * as ActionsCore from '@actions/core';
 import type * as ActionsIo from '@actions/io';
 import type * as ActionsExec from '@actions/exec';
 
+import { envDiff } from './utils/env-diff';
+import type { OutputData as OutputDataFromPostinstall } from '../../postinstall-debug-package/types';
+
 const BIN_NAME = 'bar';
 
 function defaultItemIfEmptyArray<T extends readonly unknown[], U>(
@@ -67,16 +70,53 @@ function updatePathEnv<T extends string | undefined>(
   return updatedEnv;
 }
 
-interface DebugDataFromPostinstall {
-  readonly postinstallType: string | null;
-  readonly cwd: string;
-  readonly binCommand: {
-    readonly args: readonly string[];
-    readonly result: string | null;
-  } | null;
-  readonly isGlobalMode: boolean;
-  readonly binName: string | null;
-  readonly env: Readonly<Record<string, string | null>>;
+function genJobSummaryLines(args: {
+  debugDataList: readonly OutputDataFromPostinstall[];
+  expectedValues: Readonly<Record<string, unknown>>;
+  originalEnv: Readonly<NodeJS.ProcessEnv>;
+}): string[] {
+  return args.debugDataList.flatMap(
+    ({
+      postinstallType,
+      actual: { env: postinstallEnv, binCommandResult, ...debugData },
+    }) => {
+      const binCommand = binCommandResult
+        ? {
+            args: [
+              binCommandResult.readableCommand.command,
+              ...binCommandResult.readableCommand.args,
+            ],
+            result: binCommandResult,
+          }
+        : null;
+      return [
+        `<details>`,
+        ...(postinstallType ? [`<summary>${postinstallType}</summary>`] : []),
+        '',
+        '```js',
+        inspect(
+          {
+            ...args.expectedValues,
+            ...debugData,
+            ...(binCommand
+              ? {
+                  [binCommand.args.join(' ')]: binCommand.result,
+                }
+              : {}),
+            env: envDiff(args.originalEnv, postinstallEnv, {
+              cwd: debugData.cwd,
+              prefixesToCompareRecord: args.expectedValues,
+            }),
+          },
+          { depth: Infinity },
+        ),
+        '```',
+        '',
+        '</details>',
+        '',
+      ];
+    },
+  );
 }
 
 interface MainArgs {
@@ -369,7 +409,6 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
   const tmpDirpath = await fs.mkdtemp(os.tmpdir() + path.sep);
   const installEnv = Object.assign({}, defaultEnv, {
     DEBUG_DATA_JSON_LINES_PATH: path.join(tmpDirpath, 'debug-data.jsonl'),
-    DEBUG_ORIGINAL_ENV_JSON_PATH: path.join(tmpDirpath, 'orig-env.json'),
   });
   if (pnp) {
     // see https://github.com/pnpm/pnpm/blob/v5.9.0/packages/pnpm/CHANGELOG.md#590
@@ -587,30 +626,26 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
       const setupResult = await setup({ pkgJson });
       if (!setupResult) return null;
       const { expectedLocalPrefix } = setupResult;
+      const expectedValues = {
+        expectedPnPEnabled: pnp,
+        expectedLocalPrefix,
+      };
+
       await fs.writeFile(pkgJsonPath, JSON.stringify(pkgJson));
 
       const localInstallEnv = Object.assign({}, installEnv, {
         POSTINSTALL_TYPE: `Local Dependencies (${caseName})`,
-        DEBUG_EXPECTED_VARS_JSON: JSON.stringify({
-          expectedPnPEnabled: pnp,
-          expectedLocalPrefix,
-        }),
+        DEBUG_EXPECTED_VARS_JSON: JSON.stringify(expectedValues),
       });
-      await fs.writeFile(
-        localInstallEnv.DEBUG_ORIGINAL_ENV_JSON_PATH,
-        JSON.stringify(localInstallEnv, (_, value) =>
-          value === undefined ? null : value,
-        ),
-      );
       await fs.writeFile(
         localInstallEnv.DEBUG_DATA_JSON_LINES_PATH,
         new Uint8Array(0),
       );
 
-      return { projectRootPath, localInstallEnv };
+      return { projectRootPath, expectedValues, localInstallEnv };
     });
     if (!setupResult) continue;
-    const { projectRootPath, localInstallEnv } = setupResult;
+    const { projectRootPath, expectedValues, localInstallEnv } = setupResult;
 
     const { executablesFilepathList: installedExecutables } =
       await findInstalledNpmExecutables(
@@ -661,10 +696,25 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
           localInstallEnv,
         });
 
+        const debugDataList = await fs
+          .readFile(localInstallEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
+          .then(
+            parseJsonLines as (
+              jsonLinesText: string,
+            ) => OutputDataFromPostinstall[],
+          )
+          .catch(() => []);
+        const jobSummaryLines = genJobSummaryLines({
+          debugDataList,
+          expectedValues,
+          originalEnv: localInstallEnv,
+        });
+
         if (installedExecutables.length < 1) {
           await fs.appendFile(
             GITHUB_STEP_SUMMARY,
             [
+              ...jobSummaryLines,
               '*No executables created in `node_modules/.bin` directory.*',
               '',
               '',
@@ -676,31 +726,24 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
         const binDirSet = new Set(
           installedExecutables.map((filepath) => path.dirname(filepath)),
         );
-        const debugData = await fs
-          .readFile(localInstallEnv.DEBUG_DATA_JSON_LINES_PATH, 'utf8')
-          .then(parseJsonLines)
-          .then(
-            (
-              debugDataList,
-            ): DebugDataFromPostinstall | Partial<DebugDataFromPostinstall> =>
-              (debugDataList as unknown as DebugDataFromPostinstall[]).find(
-                ({ postinstallType }) =>
-                  postinstallType === localInstallEnv.POSTINSTALL_TYPE,
-              ) ??
-              // Bun does not execute the "postinstall" script of installed dependencies.
-              // Instead, it uses the debug data from the project's "postinstall" script.
-              (debugDataList as unknown as DebugDataFromPostinstall[]).find(
-                ({ postinstallType }) =>
-                  pmType === 'bun' &&
-                  postinstallType &&
-                  /^(?:Project|Package)\b/i.test(postinstallType),
-              ) ??
-              {},
-          )
-          .catch(() => ({} as Partial<DebugDataFromPostinstall>));
+        const debugData =
+          debugDataList.find(
+            ({ postinstallType }) =>
+              postinstallType === localInstallEnv.POSTINSTALL_TYPE,
+          ) ??
+          // Bun does not execute the "postinstall" script of installed dependencies.
+          // Instead, it uses the debug data from the project's "postinstall" script.
+          debugDataList.find(
+            ({ postinstallType }) =>
+              pmType === 'bun' &&
+              postinstallType &&
+              /^(?:Project|Package)\b/i.test(postinstallType),
+          ) ??
+          null;
         await fs.appendFile(
           GITHUB_STEP_SUMMARY,
           [
+            ...jobSummaryLines,
             '```js',
             await Promise.all(
               [...binDirSet].map(async (binDir) => [
@@ -709,7 +752,7 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
                   '// This path can also be got using environment variables:',
                   filepathUsingEnvNameList(
                     binDir,
-                    debugData.env,
+                    debugData?.actual.env,
                     localInstallEnv,
                   ).map(({ path }) => path),
                   '//     ',
@@ -891,6 +934,10 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
     null,
   )) {
     const labelSuffix = caseItem ? ` (${caseItem[0]})` : '';
+    const expectedValues = {
+      expectedPnPEnabled: pnp,
+    };
+
     const { globalInstallEnv } = await core.group(
       `Setup${labelSuffix}`,
       async () => {
@@ -900,20 +947,12 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
 
         Object.assign(globalInstallEnv, {
           POSTINSTALL_TYPE: `Global Dependencies${labelSuffix}`,
-          DEBUG_EXPECTED_VARS_JSON: JSON.stringify({
-            expectedPnPEnabled: pnp,
-          }),
+          DEBUG_EXPECTED_VARS_JSON: JSON.stringify(expectedValues),
         });
         if (pmType === 'yarn' && !isYarnBerry && pnp) {
           // see https://github.com/yarnpkg/yarn/pull/6382
           globalInstallEnv['YARN_PLUGNPLAY_OVERRIDE'] = '1';
         }
-        await fs.writeFile(
-          getRequiredEnv('DEBUG_ORIGINAL_ENV_JSON_PATH', { globalInstallEnv }),
-          JSON.stringify(globalInstallEnv, (_, value) =>
-            value === undefined ? null : value,
-          ),
-        );
         await fs.writeFile(
           getRequiredEnv('DEBUG_DATA_JSON_LINES_PATH', { globalInstallEnv }),
           new Uint8Array(0),
@@ -985,13 +1024,12 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
           .catch((error) => {
             if (error.code === 'ENOENT') return [];
             throw error;
-          })) as DebugDataFromPostinstall[];
-        const { binCommand, ...debugData } =
-          debugDataList.find(
-            ({ postinstallType }) =>
-              postinstallType ===
-              getRequiredEnv('POSTINSTALL_TYPE', { globalInstallEnv }),
-          ) ?? ({} as Partial<DebugDataFromPostinstall>);
+          })) as OutputDataFromPostinstall[];
+        const debugData = debugDataList.find(
+          ({ postinstallType }) =>
+            postinstallType ===
+            getRequiredEnv('POSTINSTALL_TYPE', { globalInstallEnv }),
+        );
         async function inspectInstalledBin(
           bindirPath: string,
         ): Promise<string> {
@@ -1014,6 +1052,18 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
             .catch((error) => inspect(error));
         }
 
+        const binCommand = debugData?.actual.binCommandResult
+          ? ({
+              args: [
+                debugData.actual.binCommandResult.readableCommand.command,
+                ...debugData.actual.binCommandResult.readableCommand.args,
+              ],
+              result: debugData.actual.binCommandResult.error
+                ? null
+                : debugData.actual.binCommandResult.stdout,
+            } as const)
+          : null;
+
         const binCommandMap = new Map<string, string>();
         if (binCommand?.result) {
           binCommandMap.set(binCommand.args.join(' '), binCommand.result);
@@ -1031,8 +1081,8 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
 
         if (binDirSet.size < 1) {
           const prefixEnvName = 'npm_config_prefix';
-          if (debugData.env?.[prefixEnvName]) {
-            const prefix = debugData.env[prefixEnvName];
+          if (debugData?.actual.env[prefixEnvName]) {
+            const prefix = debugData.actual.env[prefixEnvName];
             // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
             const binDir =
               process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
@@ -1046,6 +1096,11 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
         await fs.appendFile(
           GITHUB_STEP_SUMMARY,
           [
+            ...genJobSummaryLines({
+              debugDataList,
+              expectedValues,
+              originalEnv: globalInstallEnv,
+            }),
             '```js',
             await Promise.all(
               [...binDirSet].map(async (binDir) => [
@@ -1054,7 +1109,7 @@ module.exports = async ({ core, io, exec, packageManager, pnp }: MainArgs) => {
                   '// This path can also be got using environment variables:',
                   filepathUsingEnvNameList(
                     binDir,
-                    debugData.env,
+                    debugData?.actual.env,
                     globalInstallEnv,
                   ).map(({ path }) => path),
                   '//     ',
