@@ -1,128 +1,46 @@
 import { appendFile, readFile, writeFile } from 'fs/promises';
 import * as path from 'path';
 import { inspect } from 'util';
-import type { InspectOptions } from 'util';
 
 import ansiColors from 'ansi-colors';
+import type { JsonObject } from 'type-fest';
 
 import { isGlobalMode } from './utils/is-global-mode';
 import { isPnPEnabled } from './utils/is-pnp-enabled';
 import { execBinCmd } from './utils/exec-bin-cmd';
 import { findInstalledExecutables } from './utils/find-installed-executables';
 
-/**
- * @see https://nodejs.org/api/util.html#custom-inspection-functions-on-objects
- */
-type CustomInspectFunction<TThis = unknown> = (
-  this: TThis,
-  depth: number,
-  options: Readonly<InspectOptions>,
-  _inspect: typeof inspect,
-) => string;
+export interface OutputData extends JsonObject {
+  readonly postinstallType: string | null;
+  readonly binName: string | null;
+  readonly actual: {
+    readonly cwd: string;
+    readonly env: Readonly<Record<string, string | null>>;
+    readonly pnpVersion: string | null;
+    readonly isGlobalMode: boolean;
+    readonly binCommandResult:
+      | ({
+          readonly stdout: string;
+          readonly stderr: string;
+          readonly error: string | null;
+        } & Readonly<
+          Record<
+            `${'readable' | 'executed'}Command`,
+            {
+              readonly command: string;
+              readonly args: readonly string[];
+            }
+          >
+        >)
+      | null;
+    readonly foundBinFiles: readonly string[] | null;
+  };
+}
 
 const postinstallType =
   process.argv
     .map((arg) => /^--type\s*=(.+)$/.exec(arg)?.[1]?.trim())
     .findLast(Boolean) ?? process.env['POSTINSTALL_TYPE'];
-
-async function getEnvAddedByPackageManager(
-  env: NodeJS.ProcessEnv = process.env,
-  {
-    cwd = process.cwd(),
-    prefixesToCompareRecord,
-  }: {
-    cwd?: string;
-    prefixesToCompareRecord?: Readonly<Record<string, unknown>>;
-  } = {},
-): Promise<NodeJS.ProcessEnv> {
-  const specialenvName = 'DEBUG_ORIGINAL_ENV_JSON_PATH';
-  const origEnv: Record<string, unknown> | null = env[specialenvName]
-    ? await readFile(env[specialenvName], 'utf8').then(JSON.parse)
-    : null;
-  const prefixRecord = Object.assign(
-    {
-      'process.cwd()': cwd,
-    },
-    prefixesToCompareRecord,
-  );
-
-  const customInspect: CustomInspectFunction<Record<string, unknown>> =
-    function (_depth, options, inspect) {
-      const entries = Object.entries(this).map(([key, value]) => {
-        const customInspectFn: CustomInspectFunction = function (
-          _depth,
-          options,
-          inspect,
-        ) {
-          const writableOptions = { ...options };
-          const origValue = origEnv?.[key];
-          let commentList: string[] = [];
-
-          if (/^PATH$/i.test(key) && typeof value === 'string') {
-            const pathList = value
-              .split(path.delimiter)
-              .map((path) => `- ${path}`);
-            if (
-              typeof origValue === 'string' &&
-              origValue.length < value.length &&
-              value.endsWith(origValue)
-            ) {
-              // Omit duplicate $PATH values
-              writableOptions.maxStringLength = value.length - origValue.length;
-              const origPathLength = origValue.split(path.delimiter).length;
-              pathList.splice(
-                -origPathLength,
-                origPathLength,
-                `... ${origPathLength} more paths`,
-              );
-            }
-            commentList = ['PATH List:', ...pathList];
-          } else if (typeof value === 'string') {
-            const compareList = Object.entries(prefixRecord).flatMap(
-              ([name, prefix]) => {
-                if (typeof prefix === 'string' && value.startsWith(prefix))
-                  return `  ${name}${
-                    value !== prefix
-                      ? ` + ${inspect(value.substring(prefix.length))}`
-                      : ''
-                  }`;
-                return [];
-              },
-            );
-            if (0 < compareList.length) {
-              commentList = ['Equal to this:', ...compareList];
-            }
-          }
-
-          const inspectResult = inspect(value, writableOptions);
-          return 0 < commentList.length
-            ? `(\n${(
-                inspectResult +
-                commentList.map((comment) => `\n// ${comment}`).join('')
-              ).replace(/^(?!$)/gm, '  ')}\n)`
-            : inspectResult;
-        };
-        return [key, { [inspect.custom]: customInspectFn }];
-      });
-      return inspect(Object.fromEntries(entries), options);
-    };
-
-  const envEntries = Object.entries(env);
-  return Object.assign(
-    Object.fromEntries(
-      envEntries.filter(
-        origEnv
-          ? ([key, value]) =>
-              key !== specialenvName && (origEnv[key] ?? undefined) !== value
-          : ([key]) =>
-              /^(?:DISABLE_)?(?:npm|yarn|PNPM|BUN)_|^(?:INIT_CWD|PROJECT_CWD)$/i.test(
-                key,
-              ),
-      ),
-    ),
-    { [inspect.custom]: customInspect },
-  );
-}
 
 function validateUtils(expected: { isPnPEnabled: unknown }): void {
   if (typeof expected.isPnPEnabled === 'boolean') {
@@ -158,83 +76,53 @@ function validateUtils(expected: { isPnPEnabled: unknown }): void {
       resolve(result ? (error ? { error, ...result } : result ?? {}) : null);
     });
   });
-  const binCommand: {
-    readonly args: readonly string[];
-    readonly result: string | null;
-  } | null = binCommandResult
-    ? {
-        args: [
-          binCommandResult.readableCommand.command,
-          ...binCommandResult.readableCommand.args,
-        ],
-        result: binCommandResult.error ? null : binCommandResult.stdout.trim(),
-      }
-    : null;
-
-  const binFilepathList = binName
-    ? await findInstalledExecutables(
-        [cwd].concat(binCommand?.result || []),
-        isGlobalMode
-          ? // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
-            ['bin', '']
-          : // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
-            ['node_modules/.bin'],
-        binName,
-      )
-    : undefined;
 
   const expectedValues: Readonly<Record<string, unknown>> = JSON.parse(
     process.env['DEBUG_EXPECTED_VARS_JSON'] || '{}',
   );
-  const debugData = {
-    cwd,
-    ...expectedValues,
-    isGlobalMode,
-    // see https://yarnpkg.com/advanced/pnpapi#processversionspnp
-    pnpVersion: process.versions['pnp'],
-    realBin: binFilepathList,
-    ...(binCommand?.args
-      ? { [binCommand.args.join(' ')]: binCommandResult }
-      : {}),
-    env: await getEnvAddedByPackageManager(process.env, {
-      cwd,
-      prefixesToCompareRecord: expectedValues,
-    }),
-  };
 
-  const {
-    GITHUB_STEP_SUMMARY,
-    DEBUG_DATA_JSON_PATH,
-    DEBUG_DATA_JSON_LINES_PATH,
-  } = process.env;
-  if (GITHUB_STEP_SUMMARY)
-    await appendFile(
-      GITHUB_STEP_SUMMARY,
-      [
-        `<details>`,
-        ...(postinstallType ? [`<summary>${postinstallType}</summary>`] : []),
-        '',
-        '```js',
-        inspect(debugData, { depth: Infinity }),
-        '```',
-        '',
-        '</details>',
-        '',
-        '',
-      ].join('\n'),
-    );
+  const { DEBUG_DATA_JSON_PATH, DEBUG_DATA_JSON_LINES_PATH } = process.env;
 
   if (DEBUG_DATA_JSON_PATH || DEBUG_DATA_JSON_LINES_PATH) {
-    const jsonStr = JSON.stringify({
+    const binDir: string | undefined = !binCommandResult?.error
+      ? binCommandResult?.stdout.trim()
+      : undefined;
+    const output: OutputData = {
       postinstallType: postinstallType ?? null,
-      cwd,
-      binCommand,
-      isGlobalMode,
       binName: binName ?? null,
-      env: Object.fromEntries(
-        Object.entries(process.env).map(([key, value]) => [key, value ?? null]),
-      ),
-    });
+      actual: {
+        cwd,
+        env: Object.fromEntries(
+          Object.entries(process.env).map(([key, value]) => [
+            key,
+            value ?? null,
+          ]),
+        ),
+        // see https://yarnpkg.com/advanced/pnpapi#processversionspnp
+        pnpVersion: process.versions['pnp'] ?? null,
+        isGlobalMode,
+        binCommandResult: binCommandResult
+          ? {
+              ...binCommandResult,
+              error: binCommandResult.error
+                ? inspect(binCommandResult.error)
+                : null,
+            }
+          : null,
+        foundBinFiles: binName
+          ? await findInstalledExecutables(
+              [cwd].concat(binDir || []),
+              isGlobalMode
+                ? // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
+                  ['bin', '']
+                : // see https://docs.npmjs.com/cli/v9/configuring-npm/folders#executables
+                  ['node_modules/.bin'],
+              binName,
+            )
+          : null,
+      },
+    };
+    const jsonStr = JSON.stringify(output);
     if (DEBUG_DATA_JSON_PATH) await writeFile(DEBUG_DATA_JSON_PATH, jsonStr);
     if (DEBUG_DATA_JSON_LINES_PATH)
       /**
