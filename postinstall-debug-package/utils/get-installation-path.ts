@@ -14,6 +14,9 @@ export async function getInstallationPath(): Promise<string> {
   if (!isGlobalMode) {
     // If the "npm_config_local_prefix" environment variable exists, use it.
     if (env['npm_config_local_prefix']) {
+      ///// DEBUG /////
+      console.log({ npm_config_local_prefix: env['npm_config_local_prefix'] });
+      ///// DEBUG /////
       return path.join(env['npm_config_local_prefix'], 'node_modules/.bin');
     }
 
@@ -29,6 +32,13 @@ export async function getInstallationPath(): Promise<string> {
       ) {
         if (cwdPathItems[i] !== initCwdPathItems[i]) {
           const sameParentPathItems = cwdPathItems.slice(0, i);
+          ///// DEBUG /////
+          console.log({
+            cwd: process.cwd(),
+            INIT_CWD: env['INIT_CWD'],
+            sameParentPathItems,
+          });
+          ///// DEBUG /////
           sameParentPathItems.push('node_modules', '.bin');
           return sameParentPathItems.join(path.sep);
         }
