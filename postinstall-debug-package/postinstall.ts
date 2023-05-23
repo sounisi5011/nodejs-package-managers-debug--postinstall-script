@@ -20,6 +20,10 @@ async function validateUtils(expected: {
   isPnPEnabled: unknown;
   localPrefix: unknown;
 }): Promise<void> {
+  ///// DEBUG /////
+  const { GITHUB_STEP_SUMMARY } = process.env;
+  ///// DEBUG /////
+
   if (typeof expected.isPnPEnabled === 'boolean') {
     if (isPnPEnabled !== expected.isPnPEnabled) {
       throw new Error(
@@ -33,7 +37,30 @@ async function validateUtils(expected: {
       'node_modules/.bin',
     );
     await getInstallationPath()
-      .then((installationPath) => {
+      .then(async (installationPath) => {
+        ///// DEBUG /////
+        if (GITHUB_STEP_SUMMARY) {
+          await appendFile(
+            GITHUB_STEP_SUMMARY,
+            [
+              '```js',
+              `// ${postinstallType}`,
+              '',
+              `const expectedInstallationPath = ${inspect(
+                expectedInstallationPath,
+              )};`,
+              `const installationPath = await getInstallationPath(); // => ${inspect(
+                installationPath,
+              )}`,
+              `expectedInstallationPath ${
+                expectedInstallationPath === installationPath ? '===' : '!=='
+              } installationPath`,
+              '```',
+              '',
+            ].join('\n'),
+          );
+        }
+        ///// DEBUG /////
         if (expectedInstallationPath !== installationPath) {
           const expectedPrefix = '  expected: ';
           const actualPrefix = '  actual: ';
@@ -52,8 +79,24 @@ async function validateUtils(expected: {
           );
         }
       })
-      .catch((error) => {
+      .catch(async (error) => {
         console.log('getInstallationPath() function threw this error:', error);
+        ///// DEBUG /////
+        if (GITHUB_STEP_SUMMARY) {
+          await appendFile(
+            GITHUB_STEP_SUMMARY,
+            [
+              '```js',
+              `// ${postinstallType}`,
+              '',
+              '// getInstallationPath() function threw this error:',
+              inspect(error),
+              '```',
+              '',
+            ].join('\n'),
+          );
+        }
+        ///// DEBUG /////
       });
   }
 }
