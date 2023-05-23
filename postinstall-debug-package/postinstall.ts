@@ -37,6 +37,25 @@ async function validateUtils(expected: {
       'node_modules/.bin',
     );
     await getInstallationPath()
+      .catch(async (error) => {
+        console.log('getInstallationPath() function threw this error:', error);
+        ///// DEBUG /////
+        if (GITHUB_STEP_SUMMARY) {
+          await appendFile(
+            GITHUB_STEP_SUMMARY,
+            [
+              '```js',
+              `// ${postinstallType}`,
+              '',
+              '// getInstallationPath() function threw this error:',
+              inspect(error),
+              '```',
+              '',
+            ].join('\n'),
+          );
+        }
+        ///// DEBUG /////
+      })
       .then(async (installationPath) => {
         ///// DEBUG /////
         if (GITHUB_STEP_SUMMARY) {
@@ -78,25 +97,6 @@ async function validateUtils(expected: {
             ].join('\n'),
           );
         }
-      })
-      .catch(async (error) => {
-        console.log('getInstallationPath() function threw this error:', error);
-        ///// DEBUG /////
-        if (GITHUB_STEP_SUMMARY) {
-          await appendFile(
-            GITHUB_STEP_SUMMARY,
-            [
-              '```js',
-              `// ${postinstallType}`,
-              '',
-              '// getInstallationPath() function threw this error:',
-              inspect(error),
-              '```',
-              '',
-            ].join('\n'),
-          );
-        }
-        ///// DEBUG /////
       });
   }
 }
