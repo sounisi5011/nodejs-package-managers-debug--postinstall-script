@@ -64,7 +64,7 @@ export async function getInstallationPath(): Promise<string> {
       console.log({ npm_config_local_prefix: env['npm_config_local_prefix'] });
       ///// DEBUG /////
 
-      // The value of the npm_config_local_prefix environment variable might be the workspace root.
+      // The value of the "npm_config_local_prefix" environment variable might be the workspace root.
       // If the installation is to a submodule within a workspace, this value should not be used.
       if (
         !isWorkspacePackage ||
@@ -93,8 +93,20 @@ export async function getInstallationPath(): Promise<string> {
             sameParentPathItems,
           });
           ///// DEBUG /////
-          sameParentPathItems.push('node_modules', '.bin');
-          return sameParentPathItems.join(path.sep);
+
+          // The value of the same parent directory path contained in both the current working directory and "INIT_CWD" might be the workspace root.
+          // If the installation is to a submodule within a workspace, this value should not be used.
+          if (!isWorkspacePackage) {
+            sameParentPathItems.push('node_modules', '.bin');
+            return sameParentPathItems.join(path.sep);
+          }
+
+          const localPrefix = sameParentPathItems.join(path.sep);
+          if (!(await isWorkspaceRoot(localPrefix))) {
+            return path.join(localPrefix, 'node_modules/.bin');
+          }
+
+          break;
         }
       }
     }
