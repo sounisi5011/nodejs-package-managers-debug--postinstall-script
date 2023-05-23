@@ -36,68 +36,71 @@ async function validateUtils(expected: {
       expected.localPrefix,
       'node_modules/.bin',
     );
-    await getInstallationPath()
-      .catch(async (error) => {
-        console.log('getInstallationPath() function threw this error:', error);
-        ///// DEBUG /////
-        if (GITHUB_STEP_SUMMARY) {
-          await appendFile(
-            GITHUB_STEP_SUMMARY,
-            [
-              '```js',
-              `// ${postinstallType}`,
-              '',
-              '// getInstallationPath() function threw this error:',
-              inspect(error),
-              '```',
-              '',
-            ].join('\n'),
-          );
-        }
-        ///// DEBUG /////
-      })
-      .then(async (installationPath) => {
-        ///// DEBUG /////
-        if (GITHUB_STEP_SUMMARY) {
-          await appendFile(
-            GITHUB_STEP_SUMMARY,
-            [
-              '```js',
-              `// ${postinstallType}`,
-              '',
-              `const expectedInstallationPath = ${inspect(
-                expectedInstallationPath,
-              )};`,
-              `const installationPath = await getInstallationPath(); // => ${inspect(
-                installationPath,
-              )}`,
-              `expectedInstallationPath ${
-                expectedInstallationPath === installationPath ? '===' : '!=='
-              } installationPath`,
-              '```',
-              '',
-            ].join('\n'),
-          );
-        }
-        ///// DEBUG /////
-        if (expectedInstallationPath !== installationPath) {
-          const expectedPrefix = '  expected: ';
-          const actualPrefix = '  actual: ';
-          throw new Error(
-            [
-              'getInstallationPath() function returned incorrect installation path:',
-              `${expectedPrefix}${inspect(expectedInstallationPath).replace(
-                /(?<=.)^(?!$)/gms,
-                ' '.repeat(expectedPrefix.length),
-              )}`,
-              `${actualPrefix}${inspect(installationPath).replace(
-                /(?<=.)^(?!$)/gms,
-                ' '.repeat(actualPrefix.length),
-              )}`,
-            ].join('\n'),
-          );
-        }
-      });
+    const result = await getInstallationPath()
+      .then((installationPath) => ({ installationPath }))
+      .catch((error) => ({ error }));
+    if ('error' in result) {
+      const error = result.error;
+      console.log('getInstallationPath() function threw this error:', error);
+      ///// DEBUG /////
+      if (GITHUB_STEP_SUMMARY) {
+        await appendFile(
+          GITHUB_STEP_SUMMARY,
+          [
+            '```js',
+            `// ${postinstallType}`,
+            '',
+            '// getInstallationPath() function threw this error:',
+            inspect(error),
+            '```',
+            '',
+          ].join('\n'),
+        );
+      }
+      ///// DEBUG /////
+    } else {
+      const installationPath = result.installationPath;
+      ///// DEBUG /////
+      if (GITHUB_STEP_SUMMARY) {
+        await appendFile(
+          GITHUB_STEP_SUMMARY,
+          [
+            '```js',
+            `// ${postinstallType}`,
+            '',
+            `const expectedInstallationPath = ${inspect(
+              expectedInstallationPath,
+            )};`,
+            `const installationPath = await getInstallationPath(); // => ${inspect(
+              installationPath,
+            )}`,
+            `expectedInstallationPath ${
+              expectedInstallationPath === installationPath ? '===' : '!=='
+            } installationPath`,
+            '```',
+            '',
+          ].join('\n'),
+        );
+      }
+      ///// DEBUG /////
+      if (expectedInstallationPath !== installationPath) {
+        const expectedPrefix = '  expected: ';
+        const actualPrefix = '  actual: ';
+        throw new Error(
+          [
+            'getInstallationPath() function returned incorrect installation path:',
+            `${expectedPrefix}${inspect(expectedInstallationPath).replace(
+              /(?<=.)^(?!$)/gms,
+              ' '.repeat(expectedPrefix.length),
+            )}`,
+            `${actualPrefix}${inspect(installationPath).replace(
+              /(?<=.)^(?!$)/gms,
+              ' '.repeat(actualPrefix.length),
+            )}`,
+          ].join('\n'),
+        );
+      }
+    }
   }
 }
 
