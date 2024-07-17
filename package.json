@@ -8,7 +8,7 @@
   "dependencies": {
     "@sounisi5011/ts-utils-is-property-accessible": "1.0.3",
     "ansi-colors": "4.1.3",
-    "semver": "7.5.0",
+    "semver": "7.6.3",
     "used-pm": "1.0.2"
   },
   "devDependencies": {
@@ -19,7 +19,7 @@
     "@tsconfig/node18": "2.0.0",
     "@tsconfig/strictest": "2.0.1",
     "@types/node": "18.16.3",
-    "@types/semver": "7.3.13",
+    "@types/semver": "7.5.8",
     "commitizen": "4.3.0",
     "cz-conventional-changelog": "3.3.0",
     "esbuild": "0.17.18",
